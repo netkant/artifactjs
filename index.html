@@ -99,6 +99,11 @@ nav .logo{font-weight:700;color:var(--text);font-size:1rem;margin-right:auto}
 /* Footer */
 footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color:var(--text-faint);font-size:.85rem}
 
+/* GitHub ribbon */
+.github-ribbon{position:fixed;top:0;right:0;width:150px;height:150px;overflow:hidden;z-index:100;pointer-events:none}
+.github-ribbon a{position:absolute;top:42px;right:-40px;display:block;width:200px;padding:8px 0;background:linear-gradient(135deg,var(--accent),#a78bfa);color:#fff;font-size:12px;font-weight:700;letter-spacing:.4px;text-align:center;text-decoration:none;text-transform:uppercase;transform:rotate(45deg);box-shadow:0 2px 8px rgba(0,0,0,.35);pointer-events:auto;transition:filter .15s}
+.github-ribbon a:hover{filter:brightness(1.15);text-decoration:none}
+
 /* Smooth scrollbar */
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -106,6 +111,10 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
 </style>
 </head>
 <body>
+
+<div class="github-ribbon">
+  <a href="https://github.com/urlund/artifactjs" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+</div>
 
 <nav>
 <div class="wrapper">

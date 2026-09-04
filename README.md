@@ -1,4 +1,4 @@
-# Artifact
+# ArtifactJS
 
 A lightweight shared-state library for React 19. Define data once, use it anywhere -- components that read the same artifact share one value and stay in sync automatically.
 
