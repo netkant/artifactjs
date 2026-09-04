@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Artifact - Tiny, fast state for React 19</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0b0f1a;--surface:#111827;--surface2:#1a2234;--border:#1e293b;
+  --text:#e2e8f0;--text-dim:#94a3b8;--text-faint:#64748b;
+  --accent:#6366f1;--accent-light:#818cf8;--accent-glow:rgba(99,102,241,.15);
+  --green:#22c55e;--green-dim:#16a34a;
+  --code-bg:#0d1321;--code-border:#1e293b;
+  --radius:10px;
+}
+html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;font-size:16px}
+a{color:var(--accent-light);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Layout */
+.wrapper{max-width:820px;margin:0 auto;padding:0 24px}
+header{padding:80px 0 60px;text-align:center;position:relative;overflow:hidden}
+header::before{content:'';position:absolute;top:-120px;left:50%;transform:translateX(-50%);width:600px;height:600px;background:radial-gradient(circle,rgba(99,102,241,.08) 0%,transparent 70%);pointer-events:none}
+.badge{display:inline-block;font-size:13px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--accent-light);background:var(--accent-glow);border:1px solid rgba(99,102,241,.25);border-radius:20px;padding:5px 14px;margin-bottom:20px}
+h1{font-size:clamp(2.5rem,6vw,3.5rem);font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-bottom:16px}
+h1 span{background:linear-gradient(135deg,var(--accent-light),#a78bfa,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.tagline{font-size:1.2rem;color:var(--text-dim);max-width:540px;margin:0 auto 32px}
+.hero-stats{display:flex;justify-content:center;gap:40px;margin-top:32px;flex-wrap:wrap}
+.hero-stat{text-align:center}
+.hero-stat .num{font-size:2rem;font-weight:700;color:var(--green)}
+.hero-stat .label{font-size:.8rem;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+
+/* Sections */
+section{padding:60px 0}
+section+section{border-top:1px solid var(--border)}
+h2{font-size:1.75rem;font-weight:700;letter-spacing:-.02em;margin-bottom:8px}
+h3{font-size:1.2rem;font-weight:600;margin:32px 0 12px;color:var(--text)}
+h4{font-size:1rem;font-weight:600;margin:24px 0 8px;color:var(--text-dim)}
+p,ul,ol{margin-bottom:16px;color:var(--text-dim)}
+ul{padding-left:20px}
+li{margin-bottom:6px}
+.section-label{font-size:.75rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--accent-light);margin-bottom:6px}
+
+/* Code blocks */
+pre{background:var(--code-bg);border:1px solid var(--code-border);border-radius:var(--radius);padding:20px 24px;overflow-x:auto;margin:16px 0 24px;font-size:.875rem;line-height:1.65}
+code{font-family:'JetBrains Mono',monospace;font-size:.875em}
+pre code{color:#c9d1d9}
+:not(pre)>code{background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:2px 7px;font-size:.85em;color:var(--accent-light)}
+
+/* Syntax highlighting */
+.kw{color:#ff7b72}.fn{color:#d2a8ff}.str{color:#a5d6ff}.cm{color:#8b949e;font-style:italic}.num{color:#79c0ff}.op{color:#c9d1d9}.tag{color:#7ee787}.attr{color:#d2a8ff}.punct{color:#8b949e}
+
+/* Cards */
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:24px 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px}
+.card h4{margin:0 0 8px;color:var(--text);font-size:1rem}
+.card p{margin:0;font-size:.9rem}
+.card code{font-size:.8rem}
+
+/* Comparison table */
+.comparison{width:100%;border-collapse:collapse;margin:24px 0;font-size:.9rem}
+.comparison th,.comparison td{padding:12px 16px;text-align:left;border-bottom:1px solid var(--border)}
+.comparison th{color:var(--text-faint);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px}
+.comparison td:first-child{color:var(--text);font-weight:500}
+.comparison .fast{color:var(--green);font-weight:600}
+
+/* API table */
+.api-table{width:100%;border-collapse:collapse;margin:24px 0;font-size:.875rem}
+.api-table th,.api-table td{padding:12px 16px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+.api-table th{color:var(--text-faint);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px}
+.api-table td:first-child code{color:var(--accent-light);font-weight:500}
+.api-table td:nth-child(2){color:var(--text-faint);font-size:.8rem}
+
+/* Benchmark image */
+.benchmark-img{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin:24px 0;background:#fff}
+.benchmark-img img{width:100%;display:block}
+
+/* VS section */
+.vs-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:24px 0}
+.vs-block{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;overflow:hidden}
+.vs-block .label{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;display:block}
+.vs-block .label.jotai-label{color:var(--text-faint)}
+.vs-block .label.artifact-label{color:var(--accent-light)}
+.vs-block pre{margin:0;border:0;padding:12px 16px;font-size:.8rem}
+@media(max-width:640px){.vs-grid{grid-template-columns:1fr}}
+
+/* Nav */
+nav{position:sticky;top:0;z-index:50;background:rgba(11,15,26,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:12px 0}
+nav .wrapper{display:flex;align-items:center;gap:24px;overflow-x:auto}
+nav a{color:var(--text-faint);font-size:.85rem;font-weight:500;white-space:nowrap;transition:color .15s}
+nav a:hover{color:var(--text);text-decoration:none}
+nav .logo{font-weight:700;color:var(--text);font-size:1rem;margin-right:auto}
+
+/* Footer */
+footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color:var(--text-faint);font-size:.85rem}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+</style>
+</head>
+<body>
+
+<nav>
+<div class="wrapper">
+  <span class="logo">Artifact</span>
+  <a href="#start">Quick Start</a>
+  <a href="#concepts">Concepts</a>
+  <a href="#async">Async</a>
+  <a href="#derived">Derived</a>
+  <a href="#storage">Storage</a>
+  <a href="#comparison">vs Jotai</a>
+  <a href="#benchmark">Benchmark</a>
+  <a href="#api">API</a>
+</div>
+</nav>
+
+<header>
+<div class="wrapper">
+  <div class="badge">React 19 + Suspense</div>
+  <h1>State that feels like <span>a variable</span></h1>
+  <p class="tagline">Artifact is a tiny, zero-config shared-state primitive for React 19+. One function. No providers. No boilerplate. Just data that any component can read, write, and reset.</p>
+  <div class="hero-stats">
+    <div class="hero-stat"><div class="num">~300</div><div class="label">lines of code</div></div>
+    <div class="hero-stat"><div class="num">0</div><div class="label">dependencies</div></div>
+    <div class="hero-stat"><div class="num">~95%</div><div class="label">faster reads vs Jotai</div></div>
+  </div>
+</div>
+</header>
+
+<!-- ─── QUICK START ─── -->
+<section id="start">
+<div class="wrapper">
+  <div class="section-label">Quick Start</div>
+  <h2>Three lines to shared state</h2>
+  <p>Define an artifact outside your component. Use it inside. That's it.</p>
+<pre><code><span class="kw">import</span> { artifact, useArtifact } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+
+<span class="cm">// 1. Define shared state (outside any component)</span>
+<span class="kw">const</span> counterArtifact = <span class="fn">artifact</span>(<span class="num">0</span>);
+
+<span class="cm">// 2. Use it anywhere</span>
+<span class="kw">function</span> <span class="fn">Counter</span>() {
+    <span class="kw">const</span> [count, setCount, resetValue] = <span class="fn">useArtifact</span>(counterArtifact);
+
+    <span class="kw">return</span> &lt;<span class="tag">button</span> <span class="attr">onClick</span>={() =&gt; <span class="fn">setCount</span>(count + <span class="num">1</span>)}&gt;
+        Count: {count}
+    &lt;/<span class="tag">button</span>&gt;;
+}</code></pre>
+  <p>Every component that reads <code>counterArtifact</code> shares one value. When any of them updates it, the rest re-render automatically. No providers, no context, no wiring.</p>
+</div>
+</section>
+
+<!-- ─── CONCEPTS ─── -->
+<section id="concepts">
+<div class="wrapper">
+  <div class="section-label">Concepts</div>
+  <h2>What can you put in an artifact?</h2>
+  <p>Anything. A string, a number, an object, an array, a Promise, or a function that computes a value. Artifact figures out the rest.</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <h4>Strings & Numbers</h4>
+      <p><code>artifact("Hello")</code><br><code>artifact(42)</code></p>
+    </div>
+    <div class="card">
+      <h4>Objects & Arrays</h4>
+      <p><code>artifact({ theme: "dark" })</code><br><code>artifact(["a", "b"])</code></p>
+    </div>
+    <div class="card">
+      <h4>Async / Fetch</h4>
+      <p><code>artifact(() =&gt; fetch(url))</code><br>Suspends until resolved</p>
+    </div>
+    <div class="card">
+      <h4>Direct Promises</h4>
+      <p><code>artifact(fetch(url))</code><br>Fetches immediately on load</p>
+    </div>
+    <div class="card">
+      <h4>Parameterized</h4>
+      <p><code>artifact(({ id }) =&gt; ...)</code><br>One cache per unique params</p>
+    </div>
+    <div class="card">
+      <h4>Derived</h4>
+      <p><code>artifact(({ get }) =&gt; ...)</code><br>Recomputes when deps change</p>
+    </div>
+  </div>
+
+  <h3>Static values</h3>
+  <p>The simplest artifact holds a value. It works like a global <code>useState</code> that every component can access.</p>
+<pre><code><span class="kw">const</span> nameArtifact     = <span class="fn">artifact</span>(<span class="str">"Alice"</span>);
+<span class="kw">const</span> settingsArtifact = <span class="fn">artifact</span>({ theme: <span class="str">"dark"</span>, lang: <span class="str">"en"</span> });
+<span class="kw">const</span> tagsArtifact     = <span class="fn">artifact</span>([<span class="str">"react"</span>, <span class="str">"typescript"</span>]);</code></pre>
+
+  <h3>Reading & Writing</h3>
+  <p>Use whichever hook fits your needs:</p>
+<pre><code><span class="cm">// Read + write + reset (like useState with reset)</span>
+<span class="kw">const</span> [theme, setTheme, resetValue] = <span class="fn">useArtifact</span>(settingsArtifact);
+
+<span class="cm">// Read and subscribe — this component re-renders on change</span>
+<span class="kw">const</span> theme = <span class="fn">useArtifactValue</span>(settingsArtifact);
+
+<span class="cm">// Set without subscribing — subscribed components still re-render</span>
+<span class="kw">const</span> setTheme = <span class="fn">useSetArtifact</span>(settingsArtifact);
+
+<span class="cm">// Reset to initial value</span>
+<span class="kw">const</span> resetTheme = <span class="fn">useResetArtifact</span>(settingsArtifact);</code></pre>
+  <p>Calling <code>useSetArtifact</code> still notifies other components that use <code>useArtifactValue</code> or <code>useArtifact</code>.</p>
+  <p>The setter accepts a direct value or an updater function:</p>
+<pre><code><span class="fn">setTheme</span>({ theme: <span class="str">"light"</span>, lang: <span class="str">"en"</span> });
+<span class="fn">setTheme</span>(<span class="kw">(current)</span> =&gt; ({ ...current, theme: <span class="str">"light"</span> }));</code></pre>
+</div>
+</section>
+
+<!-- ─── ASYNC ─── -->
+<section id="async">
+<div class="wrapper">
+  <div class="section-label">Async Data</div>
+  <h2>Fetch data with Suspense</h2>
+  <p>Pass a function that returns a Promise. The component suspends until the data arrives &mdash; no loading state to manage, no <code>useEffect</code> dance.</p>
+<pre><code><span class="kw">const</span> usersArtifact = <span class="fn">artifact</span>(() =&gt;
+    <span class="fn">fetch</span>(<span class="str">"/api/users"</span>).<span class="fn">then</span>(<span class="kw">(res)</span> =&gt; res.<span class="fn">json</span>())
+);
+
+<span class="kw">function</span> <span class="fn">UserList</span>() {
+    <span class="kw">const</span> users = <span class="fn">useArtifactValue</span>(usersArtifact);
+
+    <span class="kw">return</span> users.<span class="fn">map</span>(<span class="kw">(u)</span> =&gt; &lt;<span class="tag">div</span> <span class="attr">key</span>={u.id}&gt;{u.name}&lt;/<span class="tag">div</span>&gt;);
+}
+
+<span class="cm">// Wrap in Suspense for the loading fallback</span>
+&lt;<span class="tag">Suspense</span> <span class="attr">fallback</span>={&lt;<span class="tag">div</span>&gt;Loading...&lt;/<span class="tag">div</span>&gt;}&gt;
+    &lt;<span class="tag">UserList</span> /&gt;
+&lt;/<span class="tag">Suspense</span>&gt;</code></pre>
+
+  <h3>Parameterized fetching</h3>
+  <p>Need the same data shape for different IDs? Destructure the parameters. Each unique param set gets its own cache.</p>
+<pre><code><span class="kw">const</span> userArtifact = <span class="fn">artifact</span>(({ id }) =&gt;
+    <span class="fn">fetch</span>(<span class="str">`/api/users/${id}`</span>).<span class="fn">then</span>(<span class="kw">(res)</span> =&gt; res.<span class="fn">json</span>())
+);
+
+<span class="kw">function</span> <span class="fn">UserProfile</span>({ userId }) {
+    <span class="kw">const</span> user = <span class="fn">useArtifactValue</span>(<span class="fn">userArtifact</span>({ id: userId }));
+
+    <span class="kw">return</span> &lt;<span class="tag">h1</span>&gt;{user.name}&lt;/<span class="tag">h1</span>&gt;;
+}</code></pre>
+  <p><code>userArtifact({ id: 1 })</code> and <code>userArtifact({ id: 2 })</code> are independent &mdash; updating one doesn't affect the other.</p>
+
+  <h3>Resetting & re-fetching</h3>
+  <p>Call <code>useResetArtifact</code> to re-run the initializer. For async artifacts, this means a fresh fetch with Suspense kicking in again.</p>
+<pre><code><span class="kw">const</span> resetUsers = <span class="fn">useResetArtifact</span>(usersArtifact);
+
+&lt;<span class="tag">button</span> <span class="attr">onClick</span>={resetUsers}&gt;Refresh&lt;/<span class="tag">button</span>&gt;</code></pre>
+</div>
+</section>
+
+<!-- ─── DERIVED ─── -->
+<section id="derived">
+<div class="wrapper">
+  <div class="section-label">Derived State</div>
+  <h2>Artifacts that depend on other artifacts</h2>
+  <p>Use <code>get()</code> inside an initializer to read another artifact. The derived artifact recomputes automatically when its dependency changes.</p>
+<pre><code><span class="kw">const</span> todosArtifact = <span class="fn">artifact</span>(() =&gt;
+    <span class="fn">fetch</span>(<span class="str">"/api/todos"</span>).<span class="fn">then</span>(<span class="kw">(res)</span> =&gt; res.<span class="fn">json</span>())
+);
+
+<span class="kw">const</span> completedArtifact = <span class="fn">artifact</span>(({ get }) =&gt; {
+    <span class="kw">const</span> todos = <span class="fn">get</span>(todosArtifact);
+    <span class="kw">return</span> todos.<span class="fn">filter</span>(<span class="kw">(t)</span> =&gt; t.completed);
+});
+
+<span class="kw">const</span> statsArtifact = <span class="fn">artifact</span>(({ get }) =&gt; {
+    <span class="kw">const</span> todos = <span class="fn">get</span>(todosArtifact);
+    <span class="kw">const</span> done  = <span class="fn">get</span>(completedArtifact);
+    <span class="kw">return</span> { total: todos.length, done: done.length };
+});</code></pre>
+  <p>When <code>todosArtifact</code> updates, both <code>completedArtifact</code> and <code>statsArtifact</code> recompute. Only the components that read each one re-render.</p>
+</div>
+</section>
+
+<!-- ─── PERSISTENT STORAGE ─── -->
+<section id="storage">
+<div class="wrapper">
+  <div class="section-label">Persistence</div>
+  <h2>Persist state to storage</h2>
+  <p>Use <code>artifactWithStorage</code> to create an artifact whose value is automatically persisted to <code>localStorage</code> or <code>sessionStorage</code>. It reads the stored value on creation, writes on every update, and syncs across browser tabs.</p>
+<pre><code><span class="kw">import</span> { artifactWithStorage, useArtifact } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+
+<span class="cm">// Persists to localStorage by default</span>
+<span class="kw">const</span> themeArtifact = <span class="fn">artifactWithStorage</span>(<span class="str">'theme'</span>, <span class="str">'light'</span>);
+
+<span class="kw">function</span> <span class="fn">ThemeToggle</span>() {
+    <span class="kw">const</span> [theme, setTheme, resetValue] = <span class="fn">useArtifact</span>(themeArtifact);
+
+    <span class="kw">return</span> &lt;<span class="tag">button</span> <span class="attr">onClick</span>={() =&gt; <span class="fn">setTheme</span>(theme === <span class="str">'light'</span> ? <span class="str">'dark'</span> : <span class="str">'light'</span>)}&gt;
+        Theme: {theme}
+    &lt;/<span class="tag">button</span>&gt;;
+}</code></pre>
+  <p>The value persists across page reloads. If another tab updates the same key, this tab receives the change automatically via the browser's <code>storage</code> event.</p>
+
+  <h3>Session storage</h3>
+  <p>Pass a <code>storage</code> option to use <code>sessionStorage</code> instead:</p>
+<pre><code><span class="kw">const</span> draftArtifact = <span class="fn">artifactWithStorage</span>(<span class="str">'draft'</span>, <span class="str">''</span>, {
+    storage: () =&gt; sessionStorage,
+});</code></pre>
+
+  <h3>Custom serialization</h3>
+  <p>Override <code>serialize</code> and <code>deserialize</code> for non-JSON-friendly types:</p>
+<pre><code><span class="kw">const</span> tagsArtifact = <span class="fn">artifactWithStorage</span>(<span class="str">'tags'</span>, <span class="kw">new</span> <span class="fn">Set</span>(), {
+    serialize: (<span class="kw">v</span>) =&gt; JSON.<span class="fn">stringify</span>([...v]),
+    deserialize: (<span class="kw">v</span>) =&gt; <span class="kw">new</span> <span class="fn">Set</span>(JSON.<span class="fn">parse</span>(v)),
+});</code></pre>
+
+  <h3>Options</h3>
+  <table class="api-table">
+    <thead><tr><th>Option</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>storage</code></td><td><code>() =&gt; localStorage</code></td><td>A function returning the storage backend (<code>localStorage</code>, <code>sessionStorage</code>, or any <code>Storage</code>-compatible object).</td></tr>
+      <tr><td><code>serialize</code></td><td><code>JSON.stringify</code></td><td>Converts the value to a string for storage.</td></tr>
+      <tr><td><code>deserialize</code></td><td><code>JSON.parse</code></td><td>Converts the stored string back to a value.</td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<!-- ─── COMPARISON ─── -->
+<section id="comparison">
+<div class="wrapper">
+  <div class="section-label">Migration</div>
+  <h2>Coming from Jotai or Recoil?</h2>
+  <p>Artifact has the same atomic model &mdash; define state outside components, subscribe inside &mdash; but with a simpler API, native Suspense via React 19+'s <code>use()</code>, and zero dependencies.</p>
+
+  <h3>Side-by-side: Jotai vs Artifact</h3>
+
+  <h4>Basic state</h4>
+  <div class="vs-grid">
+    <div class="vs-block">
+      <span class="label jotai-label">Jotai</span>
+<pre><code><span class="kw">import</span> { atom, useAtom } <span class="kw">from</span> <span class="str">'jotai'</span>;
+
+<span class="kw">const</span> countAtom = <span class="fn">atom</span>(<span class="num">0</span>);
+
+<span class="kw">const</span> [count, setCount] = <span class="fn">useAtom</span>(countAtom);</code></pre>
+    </div>
+    <div class="vs-block">
+      <span class="label artifact-label">Artifact</span>
+<pre><code><span class="kw">import</span> { artifact, useArtifact } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+
+<span class="kw">const</span> countArtifact = <span class="fn">artifact</span>(<span class="num">0</span>);
+
+<span class="kw">const</span> [count, setCount, resetValue] = <span class="fn">useArtifact</span>(countArtifact);</code></pre>
+    </div>
+  </div>
+
+  <h4>Async data</h4>
+  <div class="vs-grid">
+    <div class="vs-block">
+      <span class="label jotai-label">Jotai</span>
+<pre><code><span class="kw">const</span> usersAtom = <span class="fn">atom</span>(<span class="kw">async</span> () =&gt; {
+    <span class="kw">const</span> res = <span class="kw">await</span> <span class="fn">fetch</span>(<span class="str">'/api/users'</span>);
+    <span class="kw">return</span> res.<span class="fn">json</span>();
+});
+<span class="cm">// Requires &lt;Suspense&gt; wrapper</span></code></pre>
+    </div>
+    <div class="vs-block">
+      <span class="label artifact-label">Artifact</span>
+<pre><code><span class="kw">const</span> usersArtifact = <span class="fn">artifact</span>(() =&gt;
+    <span class="fn">fetch</span>(<span class="str">'/api/users'</span>).<span class="fn">then</span>(r =&gt; r.<span class="fn">json</span>())
+);
+<span class="cm">// Same &lt;Suspense&gt; support, native use()</span></code></pre>
+    </div>
+  </div>
+
+  <h4>Derived / computed</h4>
+  <div class="vs-grid">
+    <div class="vs-block">
+      <span class="label jotai-label">Jotai</span>
+<pre><code><span class="kw">const</span> doubleAtom = <span class="fn">atom</span>(
+    (<span class="kw">get</span>) =&gt; <span class="fn">get</span>(countAtom) * <span class="num">2</span>
+);</code></pre>
+    </div>
+    <div class="vs-block">
+      <span class="label artifact-label">Artifact</span>
+<pre><code><span class="kw">const</span> doubleArtifact = <span class="fn">artifact</span>(
+    ({ get }) =&gt; <span class="fn">get</span>(countArtifact) * <span class="num">2</span>
+);</code></pre>
+    </div>
+  </div>
+
+  <h4>Parameterized (family)</h4>
+  <div class="vs-grid">
+    <div class="vs-block">
+      <span class="label jotai-label">Jotai</span>
+<pre><code><span class="kw">import</span> { atomFamily } <span class="kw">from</span> <span class="str">'jotai/utils'</span>;
+
+<span class="kw">const</span> userAtom = <span class="fn">atomFamily</span>((id) =&gt;
+    <span class="fn">atom</span>(<span class="kw">async</span> () =&gt; { <span class="cm">/* fetch */</span> })
+);
+
+<span class="fn">useAtomValue</span>(<span class="fn">userAtom</span>(<span class="num">123</span>));</code></pre>
+    </div>
+    <div class="vs-block">
+      <span class="label artifact-label">Artifact</span>
+<pre><code><span class="cm">// Built in. No extra import.</span>
+
+<span class="kw">const</span> userArtifact = <span class="fn">artifact</span>(({ id }) =&gt;
+    <span class="fn">fetch</span>(<span class="str">`/api/users/${id}`</span>).<span class="fn">then</span>(r =&gt; r.<span class="fn">json</span>())
+);
+
+<span class="fn">useArtifactValue</span>(<span class="fn">userArtifact</span>({ id: <span class="num">123</span> }));</code></pre>
+    </div>
+  </div>
+
+  <h4>Reset / refresh</h4>
+  <div class="vs-grid">
+    <div class="vs-block">
+      <span class="label jotai-label">Jotai</span>
+<pre><code><span class="kw">import</span> { useSetAtom, RESET } <span class="kw">from</span> <span class="str">'jotai/utils'</span>;
+
+<span class="kw">const</span> reset = <span class="fn">useSetAtom</span>(myAtom);
+<span class="fn">reset</span>(RESET);
+<span class="cm">// Only works with atomWithReset</span></code></pre>
+    </div>
+    <div class="vs-block">
+      <span class="label artifact-label">Artifact</span>
+<pre><code><span class="kw">const</span> reset = <span class="fn">useResetArtifact</span>(myArtifact);
+<span class="fn">reset</span>();
+<span class="cm">// Works with every artifact. Re-fetches async.</span></code></pre>
+    </div>
+  </div>
+
+  <h4>Persistent storage</h4>
+  <div class="vs-grid">
+    <div class="vs-block">
+      <span class="label jotai-label">Jotai</span>
+<pre><code><span class="kw">import</span> { atomWithStorage } <span class="kw">from</span> <span class="str">'jotai/utils'</span>;
+
+<span class="kw">const</span> themeAtom = <span class="fn">atomWithStorage</span>(
+    <span class="str">'theme'</span>, <span class="str">'light'</span>
+);
+<span class="cm">// Requires jotai/utils import</span></code></pre>
+    </div>
+    <div class="vs-block">
+      <span class="label artifact-label">Artifact</span>
+<pre><code><span class="kw">import</span> { artifactWithStorage } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+
+<span class="kw">const</span> themeArtifact = <span class="fn">artifactWithStorage</span>(
+    <span class="str">'theme'</span>, <span class="str">'light'</span>
+);
+<span class="cm">// Built in. Cross-tab sync included.</span></code></pre>
+    </div>
+  </div>
+
+  <h3>Key differences</h3>
+  <table class="comparison">
+    <thead><tr><th>Feature</th><th>Jotai</th><th>Artifact</th></tr></thead>
+    <tbody>
+      <tr><td>Dependencies</td><td>jotai (~8kB)</td><td>None (just React)</td></tr>
+      <tr><td>Provider required</td><td>Optional but recommended</td><td>No</td></tr>
+      <tr><td>Atom families</td><td>Separate <code>atomFamily</code> import</td><td>Built in via destructured params</td></tr>
+      <tr><td>Reset / refresh</td><td><code>atomWithReset</code> + <code>RESET</code></td><td><code>useResetArtifact</code> on any artifact</td></tr>
+      <tr><td>Persistent storage</td><td><code>atomWithStorage</code> from <code>jotai/utils</code></td><td><code>artifactWithStorage</code> built in</td></tr>
+      <tr><td>Suspense</td><td>Supported</td><td>Native via React 19+ <code>use()</code></td></tr>
+      <tr><td>Outside React</td><td><code>createStore()</code></td><td><code>readArtifact</code> / <code>writeArtifact</code></td></tr>
+      <tr><td>Bundle impact</td><td>~8kB minified</td><td>~2kB (single file)</td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<!-- ─── BENCHMARK ─── -->
+<section id="benchmark">
+<div class="wrapper">
+  <div class="section-label">Performance</div>
+  <h2>Benchmarks</h2>
+  <p>Measured against Jotai v2.17 on the same machine, same React 19+ app. 100,000 iterations per micro-test.</p>
+
+  <table class="comparison">
+    <thead><tr><th>Operation</th><th>Jotai (ms)</th><th>Artifact (ms)</th><th>Outcome</th></tr></thead>
+    <tbody>
+      <tr><td>Create</td><td>9.90</td><td>6.70</td><td class="fast">32% faster</td></tr>
+      <tr><td>Sync read</td><td>13.70</td><td>2.30</td><td class="fast">83% faster</td></tr>
+      <tr><td>Sync write (1 sub)</td><td>71.80</td><td>6.00</td><td class="fast">92% faster</td></tr>
+      <tr><td>Subscribe/unsub</td><td>55.60</td><td>4.30</td><td class="fast">92% faster</td></tr>
+      <tr><td>Derived read</td><td>18.50</td><td>1.00</td><td class="fast">95% faster</td></tr>
+      <tr><td>Reset (static)</td><td>40.00</td><td>6.50</td><td class="fast">84% faster</td></tr>
+      <tr><td>Reset (derived)</td><td>48.60</td><td>21.80</td><td class="fast">55% faster</td></tr>
+    </tbody>
+  </table>
+
+  <h3>React render benchmark (1000 subscribers)</h3>
+  <table class="comparison">
+    <thead><tr><th>Metric</th><th>Jotai</th><th>Artifact</th><th>Outcome</th></tr></thead>
+    <tbody>
+      <tr><td>Wall time (write)</td><td>61.60 ms</td><td>47.50 ms</td><td class="fast">23% faster</td></tr>
+      <tr><td>Wall time (reset)</td><td>62.70 ms</td><td>7.20 ms</td><td class="fast">89% faster</td></tr>
+    </tbody>
+  </table>
+
+  <div class="benchmark-img">
+    <img src="../.cursor/projects/Users-hu-Developer-GitHub-netkant-barani-app/assets/CleanShot_2026-04-15_at_09.31.49-a4b59c3d-f748-4528-b639-f90192155437.png"
+         alt="Artifact vs Jotai Benchmark Screenshot"
+         onerror="this.parentElement.style.display='none'">
+  </div>
+</div>
+</section>
+
+<!-- ─── OUTSIDE REACT ─── -->
+<section id="outside">
+<div class="wrapper">
+  <div class="section-label">Advanced</div>
+  <h2>Using outside React</h2>
+  <p>For tests, scripts, event handlers, or WebSocket callbacks &mdash; Artifact works without hooks too.</p>
+<pre><code><span class="kw">import</span> { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+
+<span class="cm">// Read</span>
+<span class="kw">const</span> value = <span class="fn">readArtifact</span>(counterArtifact);
+
+<span class="cm">// Write</span>
+<span class="fn">writeArtifact</span>(counterArtifact, <span class="num">42</span>);
+
+<span class="cm">// Reset to initial (re-fetches if async)</span>
+<span class="fn">resetArtifact</span>(counterArtifact);
+
+<span class="cm">// Subscribe to changes</span>
+<span class="kw">const</span> unsubscribe = <span class="fn">subscribeArtifact</span>(counterArtifact, () =&gt; {
+    console.<span class="fn">log</span>(<span class="str">"Changed:"</span>, <span class="fn">readArtifact</span>(counterArtifact));
+});
+
+<span class="fn">unsubscribe</span>();</code></pre>
+</div>
+</section>
+
+<!-- ─── ERROR HANDLING ─── -->
+<section>
+<div class="wrapper">
+  <div class="section-label">Error Handling</div>
+  <h2>Errors propagate to Error Boundaries</h2>
+  <p>If an initializer throws or a fetch rejects, the error surfaces at the nearest React Error Boundary. Combine with <code>&lt;Suspense&gt;</code> for a clean loading + error pattern.</p>
+<pre><code><span class="kw">import</span> { ErrorBoundary } <span class="kw">from</span> <span class="str">'@/components/ErrorBoundary'</span>;
+
+&lt;<span class="tag">ErrorBoundary</span>&gt;
+    &lt;<span class="tag">Suspense</span> <span class="attr">fallback</span>={&lt;<span class="tag">div</span>&gt;Loading...&lt;/<span class="tag">div</span>&gt;}&gt;
+        &lt;<span class="tag">UserList</span> /&gt;
+    &lt;/<span class="tag">Suspense</span>&gt;
+&lt;/<span class="tag">ErrorBoundary</span>&gt;</code></pre>
+</div>
+</section>
+
+<!-- ─── API REFERENCE ─── -->
+<section id="api">
+<div class="wrapper">
+  <div class="section-label">Reference</div>
+  <h2>Full API</h2>
+
+  <h3>React hooks</h3>
+  <table class="api-table">
+    <thead><tr><th>Export</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>useArtifact(ref)</code></td><td>hook</td><td>Returns <code>[value, setValue, resetValue]</code>. Subscribes to changes.</td></tr>
+      <tr><td><code>useArtifactValue(ref)</code></td><td>hook</td><td>Returns the current value. Subscribes in this component &mdash; re-renders when the artifact updates.</td></tr>
+      <tr><td><code>useSetArtifact(ref)</code></td><td>hook</td><td>Returns a setter without subscribing in this component. Subscribed components still re-render when the value changes.</td></tr>
+      <tr><td><code>useResetArtifact(ref)</code></td><td>hook</td><td>Returns a reset function. Restores initial value or re-fetches.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Outside React</h3>
+  <table class="api-table">
+    <thead><tr><th>Export</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>artifact(init)</code></td><td>function</td><td>Create an artifact from a value, promise, or function.</td></tr>
+      <tr><td><code>artifactWithStorage(key, init, opts?)</code></td><td>function</td><td>Create an artifact persisted to <code>localStorage</code> or <code>sessionStorage</code> with cross-tab sync.</td></tr>
+      <tr><td><code>readArtifact(ref)</code></td><td>function</td><td>Read the current value synchronously.</td></tr>
+      <tr><td><code>writeArtifact(ref, v)</code></td><td>function</td><td>Write a new value. Notifies all subscribers.</td></tr>
+      <tr><td><code>resetArtifact(ref)</code></td><td>function</td><td>Reset to initial value. Re-runs initializer if function/promise.</td></tr>
+      <tr><td><code>subscribeArtifact(ref, fn)</code></td><td>function</td><td>Listen for changes. Returns an unsubscribe function.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Creating artifacts</h3>
+  <table class="api-table">
+    <thead><tr><th>Pattern</th><th>Example</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td>Static value</td><td><code>artifact("hello")</code></td><td>Synchronous. Value available immediately.</td></tr>
+      <tr><td>Promise</td><td><code>artifact(fetch(url))</code></td><td>Suspends. Fetches on module load.</td></tr>
+      <tr><td>Lazy async</td><td><code>artifact(() =&gt; fetch(url))</code></td><td>Suspends. Fetches on first read.</td></tr>
+      <tr><td>Parameterized</td><td><code>artifact(({ id }) =&gt; ...)</code></td><td>Call with <code>ref({ id: 1 })</code>. Each param set cached separately.</td></tr>
+      <tr><td>Derived</td><td><code>artifact(({ get }) =&gt; ...)</code></td><td>Recomputes when dependencies change.</td></tr>
+      <tr><td>Derived + params</td><td><code>artifact(({ get, id }) =&gt; ...)</code></td><td>Parameterized and reactive.</td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<footer>
+<div class="wrapper">
+  <p>Artifact &mdash; ~300 lines, zero dependencies, built for React 19+.</p>
+</div>
+</footer>
+
+</body>
+</html>
