@@ -18,7 +18,12 @@ const counterArtifact = artifact(0);
 function Counter() {
     const [count, setCount, resetValue] = useArtifact(counterArtifact);
 
-    return <button onClick={() => setCount(count + 1)}>Count: {count}</button>;
+    return (
+        <>
+            <button onClick={() => setCount(count + 1)}>Count: {count}</button>
+            <button onClick={resetValue}>Reset</button>
+        </>
+    );
 }
 ```
 
@@ -109,6 +114,35 @@ const completedTodosArtifact = artifact(({ get }) => {
 ```
 
 When `todosArtifact` is updated, `completedTodosArtifact` recalculates and any component reading it re-renders.
+
+### Cache freshness (`maxAge` / `revalidate`)
+
+By default, artifact values live forever (until reset, overwrite, or page unload). Pass options as the second argument to expire and refresh them:
+
+```jsx
+// Refresh only when read again after 60s
+const usersArtifact = artifact(
+    () => fetch("/api/users").then((res) => res.json()),
+    { maxAge: 60_000 },
+);
+
+// Refresh automatically every 30s while something is subscribed
+const liveUsersArtifact = artifact(
+    () => fetch("/api/users").then((res) => res.json()),
+    { maxAge: 30_000, revalidate: "auto" },
+);
+```
+
+When a value expires, Artifact hard-refreshes it (same as `resetArtifact`): async readers suspend again until the new value resolves.
+
+**Options:**
+
+| Option | Default | Description |
+|---|---|---|
+| `maxAge` | `Infinity` | How long (ms) a resolved value stays fresh. Non-finite values disable expiry. |
+| `revalidate` | `"on-read"` | `"on-read"` refreshes on the next access after expiry. `"auto"` schedules a timer and refreshes when `maxAge` elapses, but only while at least one listener is subscribed. |
+
+`artifactWithStorage` does not support these options yet.
 
 ### Persistent storage
 
@@ -234,7 +268,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 | Export | Type | Description |
 |---|---|---|
-| `artifact(value)` | function | Create an artifact with a static value, promise, or initializer function |
+| `artifact(value, options?)` | function | Create an artifact with a static value, promise, or initializer function. Optional `maxAge` / `revalidate` control cache freshness |
 | `artifactWithStorage(key, value, opts?)` | function | Create an artifact persisted to `localStorage`/`sessionStorage` with cross-tab sync |
 | `useArtifact(ref)` | hook | Returns `[value, setValue, resetValue]` -- subscribes to changes |
 | `useArtifactValue(ref)` | hook | Returns the current value — subscribes in this component, re-renders on change |

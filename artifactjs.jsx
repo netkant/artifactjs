@@ -3,9 +3,14 @@ import { use, useCallback, useEffect, useMemo, useReducer } from 'react';
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
 
-function createFamily(initializer) {
+function createFamily(initializer, options = {}) {
     return {
         initializer,
+        options: {
+            maxAge: Infinity,
+            revalidate: 'on-read',
+            ...options,
+        },
         instances: new Map(),
     };
 }
@@ -51,14 +56,73 @@ function ensureArtifactRef(candidate) {
     return candidate;
 }
 
+function isExpired(state, family) {
+    const { maxAge } = family.options;
+
+    if (!Number.isFinite(maxAge) || state.status !== 'resolved') {
+        return false;
+    }
+
+    return Date.now() - state.updatedAt > maxAge;
+}
+
+function clearRevalidateTimer(state) {
+    if (state.revalidateTimer != null) {
+        clearTimeout(state.revalidateTimer);
+        state.revalidateTimer = undefined;
+    }
+}
+
+function scheduleRevalidate(state) {
+    clearRevalidateTimer(state);
+
+    const artifactRef = state.artifactRef;
+    const { maxAge, revalidate } = artifactRef.family.options;
+
+    if (revalidate !== 'auto' || !Number.isFinite(maxAge)) {
+        return;
+    }
+
+    if (state.listeners.size === 0 || state.status !== 'resolved') {
+        return;
+    }
+
+    const delay = Math.max(0, maxAge - (Date.now() - state.updatedAt));
+
+    state.revalidateTimer = setTimeout(() => {
+        state.revalidateTimer = undefined;
+
+        if (state.listeners.size === 0) {
+            return;
+        }
+
+        revalidateState(state, artifactRef);
+    }, delay);
+}
+
+function revalidateState(state, artifactRef) {
+    if (state.status === 'pending') {
+        return;
+    }
+
+    clearRevalidateTimer(state);
+    hydrateStateFromInitializer(state, artifactRef);
+    notify(state);
+}
+
 function getOrCreateState(artifactRef) {
     const cached = artifactRef.family.instances.get(artifactRef.key);
 
     if (cached) {
+        if (isExpired(cached, artifactRef.family)) {
+            revalidateState(cached, artifactRef);
+        }
+
         return cached;
     }
 
     const state = {
+        artifactRef,
         listeners: new Set(),
         status: 'resolved',
         value: undefined,
@@ -66,6 +130,8 @@ function getOrCreateState(artifactRef) {
         promise: undefined,
         dependencies: null,
         depCleanups: null,
+        updatedAt: 0,
+        revalidateTimer: undefined,
     };
 
     artifactRef.family.instances.set(artifactRef.key, state);
@@ -143,6 +209,8 @@ function wireDepSubscriptions(state, artifactRef, depStates) {
 }
 
 function hydrateStateFromInitializer(state, artifactRef) {
+    clearRevalidateTimer(state);
+
     const { initializer } = artifactRef.family;
 
     if (typeof initializer !== 'function') {
@@ -178,16 +246,24 @@ function hydrateStateFromInitializer(state, artifactRef) {
     wireDepSubscriptions(state, artifactRef, depStates);
 }
 
+function markResolved(state, value) {
+    state.status = 'resolved';
+    state.value = value;
+    state.error = undefined;
+    state.promise = undefined;
+    state.updatedAt = Date.now();
+    scheduleRevalidate(state);
+}
+
 function applyValue(state, nextValue) {
+    clearRevalidateTimer(state);
+
     if (isThenable(nextValue)) {
         state.status = 'pending';
         state.error = undefined;
         state.promise = Promise.resolve(nextValue).then(
             (resolvedValue) => {
-                state.status = 'resolved';
-                state.value = resolvedValue;
-                state.error = undefined;
-                state.promise = undefined;
+                markResolved(state, resolvedValue);
                 notify(state);
                 return resolvedValue;
             },
@@ -203,17 +279,24 @@ function applyValue(state, nextValue) {
         return;
     }
 
-    state.status = 'resolved';
-    state.value = nextValue;
-    state.error = undefined;
-    state.promise = undefined;
+    markResolved(state, nextValue);
 }
 
 function subscribe(state, listener) {
     state.listeners.add(listener);
 
+    if (isExpired(state, state.artifactRef.family)) {
+        revalidateState(state, state.artifactRef);
+    } else {
+        scheduleRevalidate(state);
+    }
+
     return () => {
         state.listeners.delete(listener);
+
+        if (state.listeners.size === 0) {
+            clearRevalidateTimer(state);
+        }
     };
 }
 
@@ -304,8 +387,8 @@ export function artifactWithStorage(key, initialValue, options = {}) {
     return base;
 }
 
-export function artifact(initializer) {
-    const family = createFamily(initializer);
+export function artifact(initializer, options = {}) {
+    const family = createFamily(initializer, options);
 
     if (typeof initializer === 'function') {
         const factory = (...args) => createArtifactRef(family, args);
@@ -340,6 +423,7 @@ export function useResetArtifact(candidate) {
     const state = getOrCreateState(artifactRef);
 
     return useCallback(() => {
+        clearRevalidateTimer(state);
         hydrateStateFromInitializer(state, artifactRef);
         notify(state);
     }, [state, artifactRef]);
@@ -356,6 +440,7 @@ export function useArtifact(candidate) {
 export function resetArtifact(candidate) {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
+    clearRevalidateTimer(state);
     hydrateStateFromInitializer(state, artifactRef);
     notify(state);
 }

@@ -158,9 +158,14 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
 <span class="kw">function</span> <span class="fn">Counter</span>() {
     <span class="kw">const</span> [count, setCount, resetValue] = <span class="fn">useArtifact</span>(counterArtifact);
 
-    <span class="kw">return</span> &lt;<span class="tag">button</span> <span class="attr">onClick</span>={() =&gt; <span class="fn">setCount</span>(count + <span class="num">1</span>)}&gt;
-        Count: {count}
-    &lt;/<span class="tag">button</span>&gt;;
+    <span class="kw">return</span> (
+        &lt;&gt;
+            &lt;<span class="tag">button</span> <span class="attr">onClick</span>={() =&gt; <span class="fn">setCount</span>(count + <span class="num">1</span>)}&gt;
+                Count: {count}
+            &lt;/<span class="tag">button</span>&gt;
+            &lt;<span class="tag">button</span> <span class="attr">onClick</span>={resetValue}&gt;Reset&lt;/<span class="tag">button</span>&gt;
+        &lt;/&gt;
+    );
 }</code></pre>
   <p>Every component that reads <code>counterArtifact</code> shares one value. When any of them updates it, the rest re-render automatically. No providers, no context, no wiring.</p>
 </div>
@@ -197,6 +202,10 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
     <div class="card">
       <h4>Derived</h4>
       <p><code>artifact(({ get }) =&gt; ...)</code><br>Recomputes when deps change</p>
+    </div>
+    <div class="card">
+      <h4>maxAge / revalidate</h4>
+      <p><code>artifact(init, { maxAge })</code><br>Expire cache on-read or auto</p>
     </div>
   </div>
 
@@ -306,9 +315,14 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
 <span class="kw">function</span> <span class="fn">ThemeToggle</span>() {
     <span class="kw">const</span> [theme, setTheme, resetValue] = <span class="fn">useArtifact</span>(themeArtifact);
 
-    <span class="kw">return</span> &lt;<span class="tag">button</span> <span class="attr">onClick</span>={() =&gt; <span class="fn">setTheme</span>(theme === <span class="str">'light'</span> ? <span class="str">'dark'</span> : <span class="str">'light'</span>)}&gt;
-        Theme: {theme}
-    &lt;/<span class="tag">button</span>&gt;;
+    <span class="kw">return</span> (
+        &lt;&gt;
+            &lt;<span class="tag">button</span> <span class="attr">onClick</span>={() =&gt; <span class="fn">setTheme</span>(theme === <span class="str">'light'</span> ? <span class="str">'dark'</span> : <span class="str">'light'</span>)}&gt;
+                Theme: {theme}
+            &lt;/<span class="tag">button</span>&gt;
+            &lt;<span class="tag">button</span> <span class="attr">onClick</span>={resetValue}&gt;Reset&lt;/<span class="tag">button</span>&gt;
+        &lt;/&gt;
+    );
 }</code></pre>
   <p>The value persists across page reloads. If another tab updates the same key, this tab receives the change automatically via the browser's <code>storage</code> event.</p>
 
@@ -580,7 +594,7 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
   <table class="api-table">
     <thead><tr><th>Export</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>artifact(init)</code></td><td>function</td><td>Create an artifact from a value, promise, or function.</td></tr>
+      <tr><td><code>artifact(init, opts?)</code></td><td>function</td><td>Create an artifact from a value, promise, or function. Optional <code>maxAge</code> / <code>revalidate</code> control cache freshness.</td></tr>
       <tr><td><code>artifactWithStorage(key, init, opts?)</code></td><td>function</td><td>Create an artifact persisted to <code>localStorage</code> or <code>sessionStorage</code> with cross-tab sync.</td></tr>
       <tr><td><code>readArtifact(ref)</code></td><td>function</td><td>Read the current value synchronously.</td></tr>
       <tr><td><code>writeArtifact(ref, v)</code></td><td>function</td><td>Write a new value. Notifies all subscribers.</td></tr>
@@ -599,6 +613,8 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
       <tr><td>Parameterized</td><td><code>artifact(({ id }) =&gt; ...)</code></td><td>Call with <code>ref({ id: 1 })</code>. Each param set cached separately.</td></tr>
       <tr><td>Derived</td><td><code>artifact(({ get }) =&gt; ...)</code></td><td>Recomputes when dependencies change.</td></tr>
       <tr><td>Derived + params</td><td><code>artifact(({ get, id }) =&gt; ...)</code></td><td>Parameterized and reactive.</td></tr>
+      <tr><td>maxAge on-read</td><td><code>artifact(init, { maxAge: 60_000 })</code></td><td>Hard-refreshes on next access after expiry. Default revalidate mode.</td></tr>
+      <tr><td>maxAge auto</td><td><code>artifact(init, { maxAge: 30_000, revalidate: "auto" })</code></td><td>Timer refresh while subscribed; skips when no listeners.</td></tr>
     </tbody>
   </table>
 </div>
