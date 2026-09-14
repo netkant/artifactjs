@@ -247,10 +247,13 @@ const resetUsers = useResetArtifact(usersArtifact);
 For use in tests, scripts, or non-React code:
 
 ```jsx
-import { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } from '@urlund/artifactjs';
+import { readArtifact, resolveArtifact, writeArtifact, resetArtifact, subscribeArtifact } from '@urlund/artifactjs';
 
-// Read current value
+// Read current value (sync peek — may be undefined while pending)
 const value = readArtifact(counterArtifact);
+
+// Wait until resolved (event handlers, scanners, non-React code)
+const order = await resolveArtifact(orderState({ id: 42 }));
 
 // Write a new value
 writeArtifact(counterArtifact, 42);
@@ -310,7 +313,8 @@ Results print to the console. Absolute milliseconds vary by machine; React numbe
 | `useArtifactValue(ref)` | hook | Returns the current value — subscribes in this component, re-renders on change |
 | `useSetArtifact(ref)` | hook | Returns a setter without subscribing in this component — subscribed components still re-render |
 | `useResetArtifact(ref)` | hook | Returns a reset function -- restores initial value or re-fetches |
-| `readArtifact(ref)` | function | Read the current value outside React |
+| `readArtifact(ref)` | function | Read the current value outside React (sync peek) |
+| `resolveArtifact(ref)` | function | Wait until resolved outside React; rejects on artifact error |
 | `resetArtifact(ref)` | function | Reset to initial value outside React |
 | `writeArtifact(ref, value)` | function | Write a value outside React |
 | `subscribeArtifact(ref, fn)` | function | Subscribe to changes outside React, returns unsubscribe |

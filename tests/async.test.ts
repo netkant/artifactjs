@@ -3,6 +3,7 @@ import {
     artifact,
     readArtifact,
     resetArtifact,
+    resolveArtifact,
     writeArtifact,
 } from '../src/index';
 import { waitForValue } from './wait';
@@ -65,5 +66,44 @@ describe('async artifacts', () => {
 
         writeArtifact(ref, 'local');
         expect(readArtifact(ref)).toBe('local');
+    });
+});
+
+describe('resolveArtifact', () => {
+    it('returns the resolved value for an async artifact', async () => {
+        const ref = artifact(async () => ({ id: 1, name: 'Ada' }));
+        await expect(resolveArtifact(ref)).resolves.toEqual({ id: 1, name: 'Ada' });
+    });
+
+    it('resolves immediately from cache without re-running the initializer', async () => {
+        const init = vi.fn(async () => 'ready');
+        const ref = artifact(init);
+
+        await expect(resolveArtifact(ref)).resolves.toBe('ready');
+        await expect(resolveArtifact(ref)).resolves.toBe('ready');
+        expect(init).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects when the initializer rejects', async () => {
+        const error = new Error('fetch failed');
+        const ref = artifact(async () => {
+            throw error;
+        });
+
+        await expect(resolveArtifact(ref)).rejects.toThrow('fetch failed');
+        await expect(resolveArtifact(ref)).rejects.toThrow('fetch failed');
+    });
+
+    it('resolves a legitimate undefined value without treating it as pending', async () => {
+        const ref = artifact(undefined as undefined);
+        await expect(resolveArtifact(ref)).resolves.toBeUndefined();
+    });
+
+    it('works with parameterized artifacts', async () => {
+        const user = artifact(async ({ id }: { id: number }) => ({ id, name: `User ${id}` }));
+
+        await expect(resolveArtifact(user({ id: 1 }))).resolves.toEqual({ id: 1, name: 'User 1' });
+        await expect(resolveArtifact(user({ id: 2 }))).resolves.toEqual({ id: 2, name: 'User 2' });
+        await expect(resolveArtifact(user({ id: 1 }))).resolves.toEqual({ id: 1, name: 'User 1' });
     });
 });

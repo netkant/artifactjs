@@ -540,10 +540,13 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
   <div class="section-label">Advanced</div>
   <h2>Using outside React</h2>
   <p>For tests, scripts, event handlers, or WebSocket callbacks &mdash; Artifact works without hooks too.</p>
-<pre><code><span class="kw">import</span> { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } <span class="kw">from</span> <span class="str">'@urlund/artifactjs'</span>;
+<pre><code><span class="kw">import</span> { readArtifact, resolveArtifact, writeArtifact, resetArtifact, subscribeArtifact } <span class="kw">from</span> <span class="str">'@urlund/artifactjs'</span>;
 
-<span class="cm">// Read</span>
+<span class="cm">// Read (sync peek — may be undefined while pending)</span>
 <span class="kw">const</span> value = <span class="fn">readArtifact</span>(counterArtifact);
+
+<span class="cm">// Wait until resolved (event handlers, scanners, non-React code)</span>
+<span class="kw">const</span> order = <span class="kw">await</span> <span class="fn">resolveArtifact</span>(orderState({ id: <span class="num">42</span> }));
 
 <span class="cm">// Write</span>
 <span class="fn">writeArtifact</span>(counterArtifact, <span class="num">42</span>);
@@ -599,7 +602,8 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
     <tbody>
       <tr><td><code>artifact(init, opts?)</code></td><td>function</td><td>Create an artifact from a value, promise, or function. Optional <code>maxAge</code> / <code>revalidate</code> control cache freshness.</td></tr>
       <tr><td><code>artifactWithStorage(key, init?, opts?)</code></td><td>function</td><td>Create an artifact persisted to <code>localStorage</code> or <code>sessionStorage</code> with cross-tab sync. Initial value is optional (defaults to <code>undefined</code>).</td></tr>
-      <tr><td><code>readArtifact(ref)</code></td><td>function</td><td>Read the current value synchronously.</td></tr>
+      <tr><td><code>readArtifact(ref)</code></td><td>function</td><td>Read the current value synchronously (sync peek).</td></tr>
+      <tr><td><code>resolveArtifact(ref)</code></td><td>function</td><td>Wait until resolved; returns a Promise. Rejects on artifact error.</td></tr>
       <tr><td><code>writeArtifact(ref, v)</code></td><td>function</td><td>Write a new value. Notifies all subscribers.</td></tr>
       <tr><td><code>resetArtifact(ref)</code></td><td>function</td><td>Reset to initial value. Re-runs initializer if function/promise.</td></tr>
       <tr><td><code>subscribeArtifact(ref, fn)</code></td><td>function</td><td>Listen for changes. Returns an unsubscribe function.</td></tr>

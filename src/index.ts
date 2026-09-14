@@ -704,6 +704,26 @@ export function readArtifact<T>(candidate: Artifact<T>): T | undefined {
     return state.value as T | undefined;
 }
 
+/**
+ * Wait until an artifact is resolved, then return its value.
+ * Joins in-flight hydration; rejects if the artifact is/becomes rejected.
+ */
+export function resolveArtifact<T>(candidate: Artifact<T>): Promise<T> {
+    const artifactRef = ensureArtifactRef(candidate);
+    const state = getOrCreateState(artifactRef);
+
+    if (state.status === 'resolved') {
+        return Promise.resolve(state.value as T);
+    }
+    if (state.status === 'rejected') {
+        return Promise.reject(state.error);
+    }
+    if (!state.promise) {
+        return Promise.reject(new Error('Pending artifact is missing a promise'));
+    }
+    return state.promise as Promise<T>;
+}
+
 /** Write a value outside React. */
 export function writeArtifact<T>(candidate: Artifact<T>, value: ArtifactUpdater<T>): void {
     const artifactRef = ensureArtifactRef(candidate);
