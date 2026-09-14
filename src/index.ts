@@ -402,12 +402,15 @@ function writeState<T>(state: ArtifactState, nextValueOrUpdater: ArtifactUpdater
     notify(state);
 }
 
-/** Create an artifact persisted to `localStorage` / `sessionStorage` with cross-tab sync. */
-export function artifactWithStorage<T>(
+/** Create an artifact persisted to `localStorage` / `sessionStorage` with cross-tab sync.
+ *  When `initialValue` is omitted, the fallback is `undefined`.
+ */
+export function artifactWithStorage<T = undefined>(
     key: string,
-    initialValue: T,
+    initialValue?: T,
     options: ArtifactStorageOptions<T> = {},
 ): Artifact<T> {
+    const fallback = initialValue as T;
     const {
         storage: getStorage = () => localStorage,
         serialize = JSON.stringify as (value: T) => string,
@@ -421,9 +424,9 @@ export function artifactWithStorage<T>(
     function readFromStorage(): T {
         try {
             const item = resolveStorage().getItem(key);
-            return item !== null ? deserialize(item) : initialValue;
+            return item !== null ? deserialize(item) : fallback;
         } catch {
-            return initialValue;
+            return fallback;
         }
     }
 
@@ -455,7 +458,7 @@ export function artifactWithStorage<T>(
             }
 
             try {
-                const next = event.newValue !== null ? deserialize(event.newValue) : initialValue;
+                const next = event.newValue !== null ? deserialize(event.newValue) : fallback;
 
                 syncing = true;
                 writeState(state, next);

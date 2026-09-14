@@ -154,13 +154,21 @@ When a value expires, Artifact hard-refreshes it (same as `resetArtifact`): asyn
 
 ### Persistent storage
 
-Use `artifactWithStorage` to persist a value to `localStorage` (default) or `sessionStorage`. The stored value is read on creation, written on every update, and synced across browser tabs automatically:
+Use `artifactWithStorage` to persist a value to `localStorage` (default) or `sessionStorage`. The stored value is read on creation, written on every update, and synced across browser tabs automatically. The initial value is optional — when omitted (or the key is missing), the value is `undefined`:
 
 ```jsx
 import { artifactWithStorage } from '@urlund/artifactjs';
 
 // Persists to localStorage by default
 const themeArtifact = artifactWithStorage('theme', 'light');
+
+// No default — missing key yields undefined
+const tokenArtifact = artifactWithStorage<string | undefined>('CapacitorStorage.token');
+
+// Options without a default: pass undefined as the second argument
+const sessionToken = artifactWithStorage('token', undefined, {
+    storage: () => sessionStorage,
+});
 
 // Use sessionStorage instead
 const draftArtifact = artifactWithStorage('draft', '', {
@@ -277,7 +285,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 | Export | Type | Description |
 |---|---|---|
 | `artifact(value, options?)` | function | Create an artifact with a static value, promise, or initializer function. Optional `maxAge` / `revalidate` control cache freshness |
-| `artifactWithStorage(key, value, opts?)` | function | Create an artifact persisted to `localStorage`/`sessionStorage` with cross-tab sync |
+| `artifactWithStorage(key, value?, opts?)` | function | Create an artifact persisted to `localStorage`/`sessionStorage` with cross-tab sync. Initial value is optional (defaults to `undefined`) |
 | `useArtifact(ref)` | hook | Returns `[value, setValue, resetValue]` -- subscribes to changes |
 | `useArtifactValue(ref)` | hook | Returns the current value — subscribes in this component, re-renders on change |
 | `useSetArtifact(ref)` | hook | Returns a setter without subscribing in this component — subscribed components still re-render |
