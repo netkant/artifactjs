@@ -1,6 +1,6 @@
 {
   "name": "@urlund/artifactjs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A lightweight shared-state library for React 19. Define data once, use it anywhere.",
   "license": "MIT",
   "type": "module",
