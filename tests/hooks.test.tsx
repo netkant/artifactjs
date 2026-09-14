@@ -50,6 +50,28 @@ describe('React hooks', () => {
         expect(result.current).toBe(7);
     });
 
+
+    it('useArtifactValue does not re-render when writing the same value', () => {
+        const count = artifact(0);
+        let renders = 0;
+
+        function Reader() {
+            renders += 1;
+            const value = useArtifactValue(count);
+            return <span data-testid="same-value">{value}</span>;
+        }
+
+        render(<Reader />);
+        expect(renders).toBe(1);
+
+        act(() => {
+            writeArtifact(count, 0);
+        });
+
+        expect(screen.getByTestId('same-value').textContent).toBe('0');
+        expect(renders).toBe(1);
+    });
+
     it('useSetArtifact writes without subscribing the setter component', () => {
         const count = artifact(0);
         let setterRenders = 0;

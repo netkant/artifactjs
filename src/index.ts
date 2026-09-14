@@ -1,4 +1,4 @@
-import { use, useCallback, useEffect, useMemo, useReducer } from 'react';
+import { use, useCallback, useSyncExternalStore } from 'react';
 
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
@@ -53,6 +53,8 @@ export type ArtifactFactory<T, P extends object = object> = ((params?: P) => Art
 
 export type ArtifactUpdater<T> = T | ((current: T | undefined) => T);
 
+type InitScratch = { get: ArtifactGet };
+
 type ArtifactState = {
     artifactRef: Artifact;
     listeners: Set<Listener>;
@@ -64,6 +66,7 @@ type ArtifactState = {
     depCleanups: Array<() => void> | null;
     updatedAt: number;
     revalidateTimer: ReturnType<typeof setTimeout> | undefined;
+    initScratch: InitScratch | null;
 };
 
 function createFamily(initializer: unknown, options: ArtifactOptions = {}): ArtifactFamily {
@@ -175,9 +178,14 @@ function revalidateState(state: ArtifactState, artifactRef: Artifact): void {
         return;
     }
 
+    const prevStatus = state.status;
+    const prevValue = state.value;
     clearRevalidateTimer(state);
     hydrateStateFromInitializer(state, artifactRef);
-    notify(state);
+
+    if (state.status === 'pending' || state.status !== prevStatus || !Object.is(state.value, prevValue)) {
+        notify(state);
+    }
 }
 
 function getOrCreateState(artifactRef: Artifact): ArtifactState {
@@ -202,6 +210,7 @@ function getOrCreateState(artifactRef: Artifact): ArtifactState {
         depCleanups: null,
         updatedAt: 0,
         revalidateTimer: undefined,
+        initScratch: null,
     };
 
     artifactRef.family.instances.set(artifactRef.key, state);
@@ -222,22 +231,96 @@ function teardownDeps(state: ArtifactState): void {
     state.depCleanups = null;
 }
 
-function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): void {
-    hydrateStateFromInitializer(state, artifactRef);
-    notify(state);
+function sameDepSet(previous: Set<ArtifactState> | null, next: Set<ArtifactState>): boolean {
+    if (!previous || previous.size !== next.size) {
+        return false;
+    }
+
+    for (const dep of next) {
+        if (!previous.has(dep)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
-function buildInitializerArg(get: ArtifactGet, artifactRef: Artifact): ArtifactInitializerArg {
+function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): void {
+    const { initializer } = artifactRef.family;
+
+    if (typeof initializer !== 'function') {
+        return;
+    }
+
+    const { result, depStates, pendingDeps, error } = runInitializer(
+        initializer as (arg: ArtifactInitializerArg) => unknown,
+        artifactRef,
+        state,
+    );
+
+    if (pendingDeps.length > 0) {
+        const prevStatus = state.status;
+        const prevValue = state.value;
+        teardownDeps(state);
+        hydrateStateFromInitializer(state, artifactRef);
+        if (state.status === 'pending' || state.status !== prevStatus || !Object.is(state.value, prevValue)) {
+            notify(state);
+        }
+        return;
+    }
+
+    const depsChanged = !sameDepSet(state.dependencies, depStates);
+
+    if (depsChanged) {
+        teardownDeps(state);
+    }
+
+    if (error) {
+        const statusChanged = state.status !== 'rejected' || state.error !== error;
+        state.status = 'rejected';
+        state.error = error;
+        if (depsChanged) {
+            wireDepSubscriptions(state, artifactRef, depStates);
+        }
+        if (statusChanged || depsChanged) {
+            notify(state);
+        }
+        return;
+    }
+
+    const changed = applyValue(state, result);
+    if (depsChanged) {
+        wireDepSubscriptions(state, artifactRef, depStates);
+    }
+    if (changed) {
+        notify(state);
+    }
+}
+
+function buildInitializerArg(
+    get: ArtifactGet,
+    artifactRef: Artifact,
+    scratch: InitScratch | null,
+): ArtifactInitializerArg {
     const userArg = artifactRef.args[0];
 
     if (isPlainObject(userArg)) {
         return { get, ...userArg };
     }
 
+    if (scratch) {
+        scratch.get = get;
+        return scratch;
+    }
+
     return { get };
 }
 
-function runInitializer(initializer: (arg: ArtifactInitializerArg) => unknown, artifactRef: Artifact) {
+function runInitializer(
+    initializer: (arg: ArtifactInitializerArg) => unknown,
+    artifactRef: Artifact,
+    state?: ArtifactState,
+) {
     const pendingDeps: Promise<unknown>[] = [];
     const depStates = new Set<ArtifactState>();
     let result: unknown;
@@ -260,8 +343,16 @@ function runInitializer(initializer: (arg: ArtifactInitializerArg) => unknown, a
         return depState.value as never;
     };
 
+    let scratch: InitScratch | null = null;
+    if (state && artifactRef.args.length === 0) {
+        if (!state.initScratch) {
+            state.initScratch = { get };
+        }
+        scratch = state.initScratch;
+    }
+
     try {
-        result = initializer(buildInitializerArg(get, artifactRef));
+        result = initializer(buildInitializerArg(get, artifactRef, scratch));
     } catch (e) {
         error = e;
     }
@@ -270,12 +361,16 @@ function runInitializer(initializer: (arg: ArtifactInitializerArg) => unknown, a
 }
 
 function wireDepSubscriptions(state: ArtifactState, artifactRef: Artifact, depStates: Set<ArtifactState>): void {
-    if (depStates.size > 0) {
-        state.dependencies = depStates;
-        state.depCleanups = [...depStates].map((depState) =>
-            subscribe(depState, () => recomputeDerivedState(state, artifactRef)),
-        );
+    if (depStates.size === 0) {
+        return;
     }
+
+    state.dependencies = depStates;
+    const cleanups: Array<() => void> = [];
+    for (const depState of depStates) {
+        cleanups.push(subscribe(depState, () => recomputeDerivedState(state, artifactRef)));
+    }
+    state.depCleanups = cleanups;
 }
 
 function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact): void {
@@ -293,6 +388,7 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
     const { result, depStates, pendingDeps, error } = runInitializer(
         initializer as (arg: ArtifactInitializerArg) => unknown,
         artifactRef,
+        state,
     );
 
     if (pendingDeps.length > 0) {
@@ -339,14 +435,17 @@ function markResolved(state: ArtifactState, value: unknown): void {
     scheduleRevalidate(state);
 }
 
-function applyValue(state: ArtifactState, nextValue: unknown): void {
-    clearRevalidateTimer(state);
-
+/** Apply a value. Returns false when the sync resolved value is unchanged (Object.is). */
+function applyValue(state: ArtifactState, nextValue: unknown): boolean {
     if (isThenable(nextValue)) {
+        clearRevalidateTimer(state);
         state.status = 'pending';
         state.error = undefined;
         state.promise = Promise.resolve(nextValue).then(
             (resolvedValue) => {
+                if (state.status === 'resolved' && Object.is(state.value, resolvedValue)) {
+                    return resolvedValue;
+                }
                 markResolved(state, resolvedValue);
                 notify(state);
                 return resolvedValue;
@@ -362,10 +461,16 @@ function applyValue(state: ArtifactState, nextValue: unknown): void {
         // Avoid unhandled rejection when only imperative readers are attached
         state.promise.catch(() => {});
 
-        return;
+        return true;
     }
 
+    if (state.status === 'resolved' && Object.is(state.value, nextValue)) {
+        return false;
+    }
+
+    clearRevalidateTimer(state);
     markResolved(state, nextValue);
+    return true;
 }
 
 function subscribe(state: ArtifactState, listener: Listener): () => void {
@@ -387,8 +492,20 @@ function subscribe(state: ArtifactState, listener: Listener): () => void {
 }
 
 function notify(state: ArtifactState): void {
-    const snapshot = [...state.listeners];
+    const { listeners } = state;
 
+    if (listeners.size === 0) {
+        return;
+    }
+
+    if (listeners.size === 1) {
+        for (const listener of listeners) {
+            listener();
+        }
+        return;
+    }
+
+    const snapshot = [...listeners];
     for (const listener of snapshot) {
         listener();
     }
@@ -416,8 +533,27 @@ function writeState<T>(state: ArtifactState, nextValueOrUpdater: ArtifactUpdater
             ? (nextValueOrUpdater as (current: T | undefined) => T)(currentValue)
             : nextValueOrUpdater;
 
-    applyValue(state, nextValue);
-    notify(state);
+    if (applyValue(state, nextValue)) {
+        notify(state);
+    }
+}
+
+function resetState(state: ArtifactState, artifactRef: Artifact): void {
+    const { initializer } = artifactRef.family;
+
+    if (typeof initializer !== 'function') {
+        writeState(state, initializer as never);
+        return;
+    }
+
+    const prevStatus = state.status;
+    const prevValue = state.value;
+    clearRevalidateTimer(state);
+    hydrateStateFromInitializer(state, artifactRef);
+
+    if (state.status === 'pending' || state.status !== prevStatus || !Object.is(state.value, prevValue)) {
+        notify(state);
+    }
 }
 
 /** Create an artifact persisted to `localStorage` / `sessionStorage` with cross-tab sync.
@@ -515,11 +651,23 @@ export function artifact(initializer: unknown, options: ArtifactOptions = {}): A
 export function useArtifactValue<T>(candidate: Artifact<T>): T {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
-    const [, forceRerender] = useReducer((value: number) => value + 1, 0);
 
-    useEffect(() => subscribe(state, forceRerender), [state]);
+    const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
+    const getSnapshot = useCallback(() => {
+        if (state.status === 'pending') {
+            if (!state.promise) {
+                throw new Error('Pending artifact is missing a promise');
+            }
+            // Suspend via Suspense (must stay consistent across renders — do not mix with use()).
+            throw state.promise;
+        }
+        if (state.status === 'rejected') {
+            throw state.error;
+        }
+        return state.value as T;
+    }, [state]);
 
-    return readState<T>(state);
+    return useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 }
 
 /** Return a setter without subscribing in this component. */
@@ -541,9 +689,7 @@ export function useResetArtifact<T>(candidate: Artifact<T>): () => void {
     const state = getOrCreateState(artifactRef);
 
     return useCallback(() => {
-        clearRevalidateTimer(state);
-        hydrateStateFromInitializer(state, artifactRef);
-        notify(state);
+        resetState(state, artifactRef);
     }, [state, artifactRef]);
 }
 
@@ -555,16 +701,14 @@ export function useArtifact<T>(
     const setValue = useSetArtifact(candidate);
     const resetValue = useResetArtifact(candidate);
 
-    return useMemo(() => [value, setValue, resetValue], [value, setValue, resetValue]);
+    return [value, setValue, resetValue];
 }
 
 /** Reset to initial value outside React. */
 export function resetArtifact<T>(candidate: Artifact<T>): void {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
-    clearRevalidateTimer(state);
-    hydrateStateFromInitializer(state, artifactRef);
-    notify(state);
+    resetState(state, artifactRef);
 }
 
 /** Read the current value synchronously outside React. */

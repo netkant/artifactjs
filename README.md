@@ -280,6 +280,26 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 </ErrorBoundary>
 ```
 
+## Benchmarks
+
+Compare Artifact against Jotai locally. The scenarios match the in-app benchmark (micro: vanilla store ops; React: hook updates with `requestAnimationFrame` timing, `memo` subscribers):
+
+```bash
+npm run benchmark
+```
+
+Or run suites separately:
+
+```bash
+npm run benchmark:micro   # create / read / write / subscribe / derived / reset (100k iters)
+```
+
+```bash
+npm run benchmark:react   # 1000 subscribed React components (write + reset wall time)
+```
+
+Results print to the console. Absolute milliseconds vary by machine; React numbers in Node/jsdom are indicative — use a real browser for publishable render timings.
+
 ## API reference
 
 | Export | Type | Description |

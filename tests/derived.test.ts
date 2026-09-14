@@ -56,4 +56,40 @@ describe('derived artifacts', () => {
         await expect(waitForValue(derived)).rejects.toThrow('dep failed');
         expect(() => readArtifact(derived)).toThrow('dep failed');
     });
+
+    it('does not notify derived when source Object.is is unchanged', () => {
+        const list: Todo[] = [{ id: 1, completed: false }];
+        const todos = artifact(list);
+        const completed = artifact(({ get }) => get(todos).filter((t) => t.completed));
+
+        const listener = vi.fn();
+        subscribeArtifact(completed, listener);
+        expect(readArtifact(completed)).toEqual([]);
+        listener.mockClear();
+
+        writeArtifact(todos, list);
+        expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('does not notify derived when a new source value yields the same derived result', () => {
+        const todos = artifact<Todo[]>([
+            { id: 1, completed: false },
+            { id: 2, completed: true },
+        ]);
+        const completedCount = artifact(({ get }) => get(todos).filter((t) => t.completed).length);
+
+        const listener = vi.fn();
+        subscribeArtifact(completedCount, listener);
+        expect(readArtifact(completedCount)).toBe(1);
+        listener.mockClear();
+
+        writeArtifact(todos, [
+            { id: 1, completed: false },
+            { id: 2, completed: true },
+            { id: 3, completed: false },
+        ]);
+        expect(readArtifact(completedCount)).toBe(1);
+        expect(listener).not.toHaveBeenCalled();
+    });
+
 });

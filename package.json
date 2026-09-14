@@ -27,6 +27,9 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
+    "benchmark": "npm run benchmark:micro && npm run benchmark:react",
+    "benchmark:micro": "tsx benchmarks/micro.ts",
+    "benchmark:react": "tsx benchmarks/react-render.tsx",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
@@ -36,10 +39,12 @@
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "jotai": "^2.20.3",
     "jsdom": "^26.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tsup": "^8.4.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   },

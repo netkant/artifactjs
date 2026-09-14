@@ -48,6 +48,27 @@ describe('static artifacts', () => {
         expect(readArtifact(count)).toBe(2);
     });
 
+
+    it('does not notify when writing the same primitive value', () => {
+        const count = artifact(0);
+        const listener = vi.fn();
+        subscribeArtifact(count, listener);
+
+        writeArtifact(count, 0);
+        expect(listener).not.toHaveBeenCalled();
+        expect(readArtifact(count)).toBe(0);
+    });
+
+    it('does not notify when resetting a static artifact already at its initial value', () => {
+        const count = artifact(0);
+        const listener = vi.fn();
+        subscribeArtifact(count, listener);
+
+        resetArtifact(count);
+        expect(listener).not.toHaveBeenCalled();
+        expect(readArtifact(count)).toBe(0);
+    });
+
     it('throws when given a non-artifact reference', () => {
         expect(() => readArtifact({} as never)).toThrow(
             'Expected an artifact reference. Pass artifact(...) or artifactFactory(...args).',
