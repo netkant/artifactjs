@@ -5,7 +5,7 @@ A lightweight shared-state library for React 19. Define data once, use it anywhe
 ## Install
 
 ```bash
-npm install artifactjs
+npm install @urlund/artifactjs
 ```
 
 Peer dependency: React 19+.
@@ -17,7 +17,7 @@ React state (`useState`) lives inside a single component. If two components need
 ## Quick start
 
 ```jsx
-import { artifact, useArtifact } from 'artifactjs';
+import { artifact, useArtifact } from '@urlund/artifactjs';
 
 // 1. Define an artifact (outside any component)
 const counterArtifact = artifact(0);
@@ -157,7 +157,7 @@ When a value expires, Artifact hard-refreshes it (same as `resetArtifact`): asyn
 Use `artifactWithStorage` to persist a value to `localStorage` (default) or `sessionStorage`. The stored value is read on creation, written on every update, and synced across browser tabs automatically:
 
 ```jsx
-import { artifactWithStorage } from 'artifactjs';
+import { artifactWithStorage } from '@urlund/artifactjs';
 
 // Persists to localStorage by default
 const themeArtifact = artifactWithStorage('theme', 'light');
@@ -239,7 +239,7 @@ const resetUsers = useResetArtifact(usersArtifact);
 For use in tests, scripts, or non-React code:
 
 ```jsx
-import { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } from 'artifactjs';
+import { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } from '@urlund/artifactjs';
 
 // Read current value
 const value = readArtifact(counterArtifact);
