@@ -2,6 +2,14 @@
 
 A lightweight shared-state library for React 19. Define data once, use it anywhere -- components that read the same artifact share one value and stay in sync automatically.
 
+## Install
+
+```bash
+npm install artifactjs
+```
+
+Peer dependency: React 19+.
+
 ## Why?
 
 React state (`useState`) lives inside a single component. If two components need the same data, you either lift state up or pass props down. Artifact removes that wiring: you define a piece of shared state **outside** your components, and any component can read or write it.
@@ -9,7 +17,7 @@ React state (`useState`) lives inside a single component. If two components need
 ## Quick start
 
 ```jsx
-import { artifact, useArtifact } from '@/hooks/artifact';
+import { artifact, useArtifact } from 'artifactjs';
 
 // 1. Define an artifact (outside any component)
 const counterArtifact = artifact(0);
@@ -149,7 +157,7 @@ When a value expires, Artifact hard-refreshes it (same as `resetArtifact`): asyn
 Use `artifactWithStorage` to persist a value to `localStorage` (default) or `sessionStorage`. The stored value is read on creation, written on every update, and synced across browser tabs automatically:
 
 ```jsx
-import { artifactWithStorage } from '@/hooks/artifact';
+import { artifactWithStorage } from 'artifactjs';
 
 // Persists to localStorage by default
 const themeArtifact = artifactWithStorage('theme', 'light');
@@ -231,7 +239,7 @@ const resetUsers = useResetArtifact(usersArtifact);
 For use in tests, scripts, or non-React code:
 
 ```jsx
-import { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } from '@/hooks/artifact';
+import { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } from 'artifactjs';
 
 // Read current value
 const value = readArtifact(counterArtifact);

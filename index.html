@@ -149,7 +149,7 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
   <div class="section-label">Quick Start</div>
   <h2>Three lines to shared state</h2>
   <p>Define an artifact outside your component. Use it inside. That's it.</p>
-<pre><code><span class="kw">import</span> { artifact, useArtifact } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+<pre><code><span class="kw">import</span> { artifact, useArtifact } <span class="kw">from</span> <span class="str">'artifactjs'</span>;
 
 <span class="cm">// 1. Define shared state (outside any component)</span>
 <span class="kw">const</span> counterArtifact = <span class="fn">artifact</span>(<span class="num">0</span>);
@@ -307,7 +307,7 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
   <div class="section-label">Persistence</div>
   <h2>Persist state to storage</h2>
   <p>Use <code>artifactWithStorage</code> to create an artifact whose value is automatically persisted to <code>localStorage</code> or <code>sessionStorage</code>. It reads the stored value on creation, writes on every update, and syncs across browser tabs.</p>
-<pre><code><span class="kw">import</span> { artifactWithStorage, useArtifact } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+<pre><code><span class="kw">import</span> { artifactWithStorage, useArtifact } <span class="kw">from</span> <span class="str">'artifactjs'</span>;
 
 <span class="cm">// Persists to localStorage by default</span>
 <span class="kw">const</span> themeArtifact = <span class="fn">artifactWithStorage</span>(<span class="str">'theme'</span>, <span class="str">'light'</span>);
@@ -372,7 +372,7 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
     </div>
     <div class="vs-block">
       <span class="label artifact-label">Artifact</span>
-<pre><code><span class="kw">import</span> { artifact, useArtifact } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+<pre><code><span class="kw">import</span> { artifact, useArtifact } <span class="kw">from</span> <span class="str">'artifactjs'</span>;
 
 <span class="kw">const</span> countArtifact = <span class="fn">artifact</span>(<span class="num">0</span>);
 
@@ -470,7 +470,7 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
     </div>
     <div class="vs-block">
       <span class="label artifact-label">Artifact</span>
-<pre><code><span class="kw">import</span> { artifactWithStorage } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+<pre><code><span class="kw">import</span> { artifactWithStorage } <span class="kw">from</span> <span class="str">'artifactjs'</span>;
 
 <span class="kw">const</span> themeArtifact = <span class="fn">artifactWithStorage</span>(
     <span class="str">'theme'</span>, <span class="str">'light'</span>
@@ -537,7 +537,7 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
   <div class="section-label">Advanced</div>
   <h2>Using outside React</h2>
   <p>For tests, scripts, event handlers, or WebSocket callbacks &mdash; Artifact works without hooks too.</p>
-<pre><code><span class="kw">import</span> { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } <span class="kw">from</span> <span class="str">'@/hooks/artifact'</span>;
+<pre><code><span class="kw">import</span> { readArtifact, writeArtifact, resetArtifact, subscribeArtifact } <span class="kw">from</span> <span class="str">'artifactjs'</span>;
 
 <span class="cm">// Read</span>
 <span class="kw">const</span> value = <span class="fn">readArtifact</span>(counterArtifact);

@@ -1,0 +1,58 @@
+{
+  "name": "artifactjs",
+  "version": "0.1.0",
+  "description": "A lightweight shared-state library for React 19. Define data once, use it anywhere.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=19"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.0"
+  },
+  "keywords": [
+    "react",
+    "state",
+    "shared-state",
+    "suspense",
+    "hooks",
+    "atomic",
+    "jotai-alternative",
+    "localstorage"
+  ],
+  "author": "Henrik Urlund <henrik@urlund.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/urlund/artifactjs.git"
+  },
+  "homepage": "https://github.com/urlund/artifactjs#readme",
+  "bugs": {
+    "url": "https://github.com/urlund/artifactjs/issues"
+  }
+}

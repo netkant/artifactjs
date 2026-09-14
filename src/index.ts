@@ -3,7 +3,70 @@ import { use, useCallback, useEffect, useMemo, useReducer } from 'react';
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
 
-function createFamily(initializer, options = {}) {
+/** Cache freshness options for `artifact()`. */
+export interface ArtifactOptions {
+    maxAge?: number;
+    revalidate?: 'on-read' | 'auto';
+
+}
+
+/** Options for `artifactWithStorage()`. */
+export interface ArtifactStorageOptions<T> {
+    storage?: Storage | (() => Storage);
+    serialize?: (value: T) => string;
+    deserialize?: (value: string) => T;
+}
+
+/** Read another artifact from inside an initializer (derived artifacts). */
+export type ArtifactGet = <T>(ref: Artifact<T>) => T;
+
+/** Argument passed to function initializers: `{ get }` plus any call-site params. */
+export type ArtifactInitializerArg<P extends object = object> = { get: ArtifactGet } & P;
+
+type ResolvedOptions = {
+    maxAge: number;
+    revalidate: 'on-read' | 'auto';
+};
+
+type Listener = () => void;
+
+type ArtifactFamily = {
+    initializer: unknown;
+    options: ResolvedOptions;
+    instances: Map<string, ArtifactState>;
+};
+
+/**
+ * A shared-state reference created by `artifact()` / `artifactWithStorage()`.
+ * The `__value` field is a phantom type used only for TypeScript inference.
+ */
+export type Artifact<T = unknown> = {
+    readonly [ARTIFACT_REF]: true;
+    readonly family: ArtifactFamily;
+    readonly args: unknown[];
+    readonly key: string;
+    readonly __value?: T;
+};
+
+/** Function artifact that is also usable as a default (no-args) reference. */
+export type ArtifactFactory<T, P extends object = object> = ((params?: P) => Artifact<T>) & Artifact<T>;
+
+export type ArtifactUpdater<T> = T | ((current: T | undefined) => T);
+
+type ArtifactState = {
+    artifactRef: Artifact;
+    listeners: Set<Listener>;
+    status: 'resolved' | 'pending' | 'rejected';
+    value: unknown;
+    error: unknown;
+    promise: Promise<unknown> | undefined;
+    dependencies: Set<ArtifactState> | null;
+    depCleanups: Array<() => void> | null;
+    updatedAt: number;
+    revalidateTimer: ReturnType<typeof setTimeout> | undefined;
+};
+
+function createFamily(initializer: unknown, options: ArtifactOptions = {}): ArtifactFamily {
     return {
         initializer,
         options: {
@@ -15,11 +78,11 @@ function createFamily(initializer, options = {}) {
     };
 }
 
-function isArtifactRef(value) {
-    return Boolean(value?.[ARTIFACT_REF]);
+function isArtifactRef(value: unknown): value is Artifact {
+    return Boolean(value && typeof value === 'object' && ARTIFACT_REF in (value as object) && (value as Artifact)[ARTIFACT_REF]);
 }
 
-function createArtifactRef(family, args = []) {
+function createArtifactRef(family: ArtifactFamily, args: unknown[] = []): Artifact {
     return {
         [ARTIFACT_REF]: true,
         family,
@@ -28,7 +91,7 @@ function createArtifactRef(family, args = []) {
     };
 }
 
-function createCacheKey(args) {
+function createCacheKey(args: unknown[]): string {
     if (args.length === 0) {
         return DEFAULT_KEY;
     }
@@ -40,15 +103,17 @@ function createCacheKey(args) {
     }
 }
 
-function isThenable(value) {
-    return value !== null && typeof value === 'object' && typeof value.then === 'function';
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+    return value !== null && typeof value === 'object' && typeof (value as PromiseLike<unknown>).then === 'function';
 }
 
-function isPlainObject(value) {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value) && !isThenable(value);
 }
 
-function ensureArtifactRef(candidate) {
+function ensureArtifactRef<T>(candidate: Artifact<T>): Artifact<T>;
+function ensureArtifactRef(candidate: unknown): Artifact;
+function ensureArtifactRef(candidate: unknown): Artifact {
     if (!isArtifactRef(candidate)) {
         throw new Error('Expected an artifact reference. Pass artifact(...) or artifactFactory(...args).');
     }
@@ -56,7 +121,7 @@ function ensureArtifactRef(candidate) {
     return candidate;
 }
 
-function isExpired(state, family) {
+function isExpired(state: ArtifactState, family: ArtifactFamily): boolean {
     const { maxAge } = family.options;
 
     if (!Number.isFinite(maxAge) || state.status !== 'resolved') {
@@ -66,14 +131,14 @@ function isExpired(state, family) {
     return Date.now() - state.updatedAt > maxAge;
 }
 
-function clearRevalidateTimer(state) {
+function clearRevalidateTimer(state: ArtifactState): void {
     if (state.revalidateTimer != null) {
         clearTimeout(state.revalidateTimer);
         state.revalidateTimer = undefined;
     }
 }
 
-function scheduleRevalidate(state) {
+function scheduleRevalidate(state: ArtifactState): void {
     clearRevalidateTimer(state);
 
     const artifactRef = state.artifactRef;
@@ -100,7 +165,7 @@ function scheduleRevalidate(state) {
     }, delay);
 }
 
-function revalidateState(state, artifactRef) {
+function revalidateState(state: ArtifactState, artifactRef: Artifact): void {
     if (state.status === 'pending') {
         return;
     }
@@ -110,7 +175,7 @@ function revalidateState(state, artifactRef) {
     notify(state);
 }
 
-function getOrCreateState(artifactRef) {
+function getOrCreateState(artifactRef: Artifact): ArtifactState {
     const cached = artifactRef.family.instances.get(artifactRef.key);
 
     if (cached) {
@@ -121,7 +186,7 @@ function getOrCreateState(artifactRef) {
         return cached;
     }
 
-    const state = {
+    const state: ArtifactState = {
         artifactRef,
         listeners: new Set(),
         status: 'resolved',
@@ -141,7 +206,7 @@ function getOrCreateState(artifactRef) {
     return state;
 }
 
-function teardownDeps(state) {
+function teardownDeps(state: ArtifactState): void {
     if (state.depCleanups) {
         for (const cleanup of state.depCleanups) {
             cleanup();
@@ -152,12 +217,12 @@ function teardownDeps(state) {
     state.depCleanups = null;
 }
 
-function recomputeDerivedState(state, artifactRef) {
+function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): void {
     hydrateStateFromInitializer(state, artifactRef);
     notify(state);
 }
 
-function buildInitializerArg(get, artifactRef) {
+function buildInitializerArg(get: ArtifactGet, artifactRef: Artifact): ArtifactInitializerArg {
     const userArg = artifactRef.args[0];
 
     if (isPlainObject(userArg)) {
@@ -167,27 +232,27 @@ function buildInitializerArg(get, artifactRef) {
     return { get };
 }
 
-function runInitializer(initializer, artifactRef) {
-    const pendingDeps = [];
-    const depStates = new Set();
-    let result;
-    let error;
+function runInitializer(initializer: (arg: ArtifactInitializerArg) => unknown, artifactRef: Artifact) {
+    const pendingDeps: Promise<unknown>[] = [];
+    const depStates = new Set<ArtifactState>();
+    let result: unknown;
+    let error: unknown;
 
-    const get = (candidate) => {
+    const get: ArtifactGet = (candidate) => {
         const depRef = ensureArtifactRef(candidate);
         const depState = getOrCreateState(depRef);
         depStates.add(depState);
 
         if (depState.status === 'pending') {
-            pendingDeps.push(depState.promise);
-            return undefined;
+            pendingDeps.push(depState.promise!);
+            return undefined as never;
         }
 
         if (depState.status === 'rejected') {
             throw depState.error;
         }
 
-        return depState.value;
+        return depState.value as never;
     };
 
     try {
@@ -199,7 +264,7 @@ function runInitializer(initializer, artifactRef) {
     return { result, depStates, pendingDeps, error };
 }
 
-function wireDepSubscriptions(state, artifactRef, depStates) {
+function wireDepSubscriptions(state: ArtifactState, artifactRef: Artifact, depStates: Set<ArtifactState>): void {
     if (depStates.size > 0) {
         state.dependencies = depStates;
         state.depCleanups = [...depStates].map((depState) =>
@@ -208,7 +273,7 @@ function wireDepSubscriptions(state, artifactRef, depStates) {
     }
 }
 
-function hydrateStateFromInitializer(state, artifactRef) {
+function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact): void {
     clearRevalidateTimer(state);
 
     const { initializer } = artifactRef.family;
@@ -220,7 +285,10 @@ function hydrateStateFromInitializer(state, artifactRef) {
 
     teardownDeps(state);
 
-    const { result, depStates, pendingDeps, error } = runInitializer(initializer, artifactRef);
+    const { result, depStates, pendingDeps, error } = runInitializer(
+        initializer as (arg: ArtifactInitializerArg) => unknown,
+        artifactRef,
+    );
 
     if (pendingDeps.length > 0) {
         state.status = 'pending';
@@ -246,7 +314,7 @@ function hydrateStateFromInitializer(state, artifactRef) {
     wireDepSubscriptions(state, artifactRef, depStates);
 }
 
-function markResolved(state, value) {
+function markResolved(state: ArtifactState, value: unknown): void {
     state.status = 'resolved';
     state.value = value;
     state.error = undefined;
@@ -255,7 +323,7 @@ function markResolved(state, value) {
     scheduleRevalidate(state);
 }
 
-function applyValue(state, nextValue) {
+function applyValue(state: ArtifactState, nextValue: unknown): void {
     clearRevalidateTimer(state);
 
     if (isThenable(nextValue)) {
@@ -267,7 +335,7 @@ function applyValue(state, nextValue) {
                 notify(state);
                 return resolvedValue;
             },
-            (error) => {
+            (error: unknown) => {
                 state.status = 'rejected';
                 state.error = error;
                 state.promise = undefined;
@@ -282,7 +350,7 @@ function applyValue(state, nextValue) {
     markResolved(state, nextValue);
 }
 
-function subscribe(state, listener) {
+function subscribe(state: ArtifactState, listener: Listener): () => void {
     state.listeners.add(listener);
 
     if (isExpired(state, state.artifactRef.family)) {
@@ -300,7 +368,7 @@ function subscribe(state, listener) {
     };
 }
 
-function notify(state) {
+function notify(state: ArtifactState): void {
     const snapshot = [...state.listeners];
 
     for (const listener of snapshot) {
@@ -308,35 +376,49 @@ function notify(state) {
     }
 }
 
-function readState(state) {
+function readState<T>(state: ArtifactState): T {
     if (state.status === 'pending') {
-        return use(state.promise);
+        if (!state.promise) {
+            throw new Error('Pending artifact is missing a promise');
+        }
+        return use(state.promise) as T;
     }
 
     if (state.status === 'rejected') {
         throw state.error;
     }
 
-    return state.value;
+    return state.value as T;
 }
 
-function writeState(state, nextValueOrUpdater) {
-    const currentValue = state.status === 'resolved' ? state.value : undefined;
+function writeState<T>(state: ArtifactState, nextValueOrUpdater: ArtifactUpdater<T>): void {
+    const currentValue = state.status === 'resolved' ? (state.value as T) : undefined;
     const nextValue =
-        typeof nextValueOrUpdater === 'function' ? nextValueOrUpdater(currentValue) : nextValueOrUpdater;
+        typeof nextValueOrUpdater === 'function'
+            ? (nextValueOrUpdater as (current: T | undefined) => T)(currentValue)
+            : nextValueOrUpdater;
 
     applyValue(state, nextValue);
     notify(state);
 }
 
-export function artifactWithStorage(key, initialValue, options = {}) {
-    const { storage: getStorage = () => localStorage, serialize = JSON.stringify, deserialize = JSON.parse } = options;
+/** Create an artifact persisted to `localStorage` / `sessionStorage` with cross-tab sync. */
+export function artifactWithStorage<T>(
+    key: string,
+    initialValue: T,
+    options: ArtifactStorageOptions<T> = {},
+): Artifact<T> {
+    const {
+        storage: getStorage = () => localStorage,
+        serialize = JSON.stringify as (value: T) => string,
+        deserialize = JSON.parse as (value: string) => T,
+    } = options;
 
-    function resolveStorage() {
+    function resolveStorage(): Storage {
         return typeof getStorage === 'function' ? getStorage() : getStorage;
     }
 
-    function readFromStorage() {
+    function readFromStorage(): T {
         try {
             const item = resolveStorage().getItem(key);
             return item !== null ? deserialize(item) : initialValue;
@@ -345,7 +427,7 @@ export function artifactWithStorage(key, initialValue, options = {}) {
         }
     }
 
-    function writeToStorage(value) {
+    function writeToStorage(value: T): void {
         try {
             resolveStorage().setItem(key, serialize(value));
         } catch {
@@ -363,7 +445,7 @@ export function artifactWithStorage(key, initialValue, options = {}) {
             return;
         }
 
-        writeToStorage(state.value);
+        writeToStorage(state.value as T);
     });
 
     if (typeof window !== 'undefined') {
@@ -387,11 +469,20 @@ export function artifactWithStorage(key, initialValue, options = {}) {
     return base;
 }
 
-export function artifact(initializer, options = {}) {
+/** Create an artifact from an initializer / derived / parameterized function. */
+export function artifact<T, P extends object = object>(
+    initializer: (arg: ArtifactInitializerArg<P>) => T | Promise<T>,
+    options?: ArtifactOptions,
+): ArtifactFactory<T, P>;
+/** Create an artifact from a Promise (fetches immediately on module load). */
+export function artifact<T>(promise: Promise<T>, options?: ArtifactOptions): Artifact<T>;
+/** Create an artifact from a static value. */
+export function artifact<T>(value: T, options?: ArtifactOptions): Artifact<T>;
+export function artifact(initializer: unknown, options: ArtifactOptions = {}): Artifact | ArtifactFactory<unknown> {
     const family = createFamily(initializer, options);
 
     if (typeof initializer === 'function') {
-        const factory = (...args) => createArtifactRef(family, args);
+        const factory = (...args: unknown[]) => createArtifactRef(family, args);
 
         return Object.assign(factory, createArtifactRef(family));
     }
@@ -399,26 +490,32 @@ export function artifact(initializer, options = {}) {
     return createArtifactRef(family);
 }
 
-export function useArtifactValue(candidate) {
+/** Read the current value and subscribe — this component re-renders on change. */
+export function useArtifactValue<T>(candidate: Artifact<T>): T {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
-    const [, forceRerender] = useReducer((value) => value + 1, 0);
+    const [, forceRerender] = useReducer((value: number) => value + 1, 0);
 
     useEffect(() => subscribe(state, forceRerender), [state]);
 
-    return readState(state);
+    return readState<T>(state);
 }
 
-export function useSetArtifact(candidate) {
+/** Return a setter without subscribing in this component. */
+export function useSetArtifact<T>(candidate: Artifact<T>): (nextValueOrUpdater: ArtifactUpdater<T>) => void {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
 
-    return useCallback((nextValueOrUpdater) => {
-        writeState(state, nextValueOrUpdater);
-    }, [state]);
+    return useCallback(
+        (nextValueOrUpdater: ArtifactUpdater<T>) => {
+            writeState(state, nextValueOrUpdater);
+        },
+        [state],
+    );
 }
 
-export function useResetArtifact(candidate) {
+/** Return a reset function — restores initial value or re-fetches. */
+export function useResetArtifact<T>(candidate: Artifact<T>): () => void {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
 
@@ -429,7 +526,10 @@ export function useResetArtifact(candidate) {
     }, [state, artifactRef]);
 }
 
-export function useArtifact(candidate) {
+/** Returns `[value, setValue, resetValue]` — like `useState` with reset. */
+export function useArtifact<T>(
+    candidate: Artifact<T>,
+): [T, (nextValueOrUpdater: ArtifactUpdater<T>) => void, () => void] {
     const value = useArtifactValue(candidate);
     const setValue = useSetArtifact(candidate);
     const resetValue = useResetArtifact(candidate);
@@ -437,7 +537,8 @@ export function useArtifact(candidate) {
     return useMemo(() => [value, setValue, resetValue], [value, setValue, resetValue]);
 }
 
-export function resetArtifact(candidate) {
+/** Reset to initial value outside React. */
+export function resetArtifact<T>(candidate: Artifact<T>): void {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
     clearRevalidateTimer(state);
@@ -445,20 +546,23 @@ export function resetArtifact(candidate) {
     notify(state);
 }
 
-export function readArtifact(candidate) {
+/** Read the current value synchronously outside React. */
+export function readArtifact<T>(candidate: Artifact<T>): T | undefined {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
     if (state.status === 'rejected') throw state.error;
-    return state.value;
+    return state.value as T | undefined;
 }
 
-export function writeArtifact(candidate, value) {
+/** Write a value outside React. */
+export function writeArtifact<T>(candidate: Artifact<T>, value: ArtifactUpdater<T>): void {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
     writeState(state, value);
 }
 
-export function subscribeArtifact(candidate, listener) {
+/** Subscribe to changes outside React. Returns an unsubscribe function. */
+export function subscribeArtifact<T>(candidate: Artifact<T>, listener: Listener): () => void {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
     return subscribe(state, listener);
