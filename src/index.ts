@@ -1,4 +1,4 @@
-import { use, useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
@@ -183,7 +183,7 @@ function revalidateState(state: ArtifactState, artifactRef: Artifact): void {
     clearRevalidateTimer(state);
     hydrateStateFromInitializer(state, artifactRef);
 
-    if (state.status === 'pending' || state.status !== prevStatus || !Object.is(state.value, prevValue)) {
+    if (state.status !== prevStatus || !Object.is(state.value, prevValue)) {
         notify(state);
     }
 }
@@ -263,7 +263,7 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
         const prevValue = state.value;
         teardownDeps(state);
         hydrateStateFromInitializer(state, artifactRef);
-        if (state.status === 'pending' || state.status !== prevStatus || !Object.is(state.value, prevValue)) {
+        if (state.status !== prevStatus || !Object.is(state.value, prevValue)) {
             notify(state);
         }
         return;
@@ -511,21 +511,6 @@ function notify(state: ArtifactState): void {
     }
 }
 
-function readState<T>(state: ArtifactState): T {
-    if (state.status === 'pending') {
-        if (!state.promise) {
-            throw new Error('Pending artifact is missing a promise');
-        }
-        return use(state.promise) as T;
-    }
-
-    if (state.status === 'rejected') {
-        throw state.error;
-    }
-
-    return state.value as T;
-}
-
 function writeState<T>(state: ArtifactState, nextValueOrUpdater: ArtifactUpdater<T>): void {
     const currentValue = state.status === 'resolved' ? (state.value as T) : undefined;
     const nextValue =
@@ -551,7 +536,7 @@ function resetState(state: ArtifactState, artifactRef: Artifact): void {
     clearRevalidateTimer(state);
     hydrateStateFromInitializer(state, artifactRef);
 
-    if (state.status === 'pending' || state.status !== prevStatus || !Object.is(state.value, prevValue)) {
+    if (state.status !== prevStatus || !Object.is(state.value, prevValue)) {
         notify(state);
     }
 }

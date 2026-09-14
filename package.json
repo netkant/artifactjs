@@ -30,7 +30,8 @@
     "benchmark": "npm run benchmark:micro && npm run benchmark:react",
     "benchmark:micro": "tsx benchmarks/micro.ts",
     "benchmark:react": "tsx benchmarks/react-render.tsx",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "publish": "npm publish --access public"
   },
   "peerDependencies": {
     "react": ">=19"
