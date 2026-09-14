@@ -79,7 +79,12 @@ function createFamily(initializer: unknown, options: ArtifactOptions = {}): Arti
 }
 
 function isArtifactRef(value: unknown): value is Artifact {
-    return Boolean(value && typeof value === 'object' && ARTIFACT_REF in (value as object) && (value as Artifact)[ARTIFACT_REF]);
+    return Boolean(
+        value &&
+            (typeof value === 'object' || typeof value === 'function') &&
+            ARTIFACT_REF in (value as object) &&
+            (value as Artifact)[ARTIFACT_REF],
+    );
 }
 
 function createArtifactRef(family: ArtifactFamily, args: unknown[] = []): Artifact {
@@ -293,13 +298,24 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
     if (pendingDeps.length > 0) {
         state.status = 'pending';
         state.error = undefined;
-        state.promise = Promise.all(pendingDeps).then(() => {
-            hydrateStateFromInitializer(state, artifactRef);
-            notify(state);
-            if (state.status === 'pending') return state.promise;
-            if (state.status === 'rejected') throw state.error;
-            return state.value;
-        });
+        state.promise = Promise.all(pendingDeps).then(
+            () => {
+                hydrateStateFromInitializer(state, artifactRef);
+                notify(state);
+                if (state.status === 'pending') return state.promise;
+                if (state.status === 'rejected') throw state.error;
+                return state.value;
+            },
+            (error: unknown) => {
+                state.status = 'rejected';
+                state.error = error;
+                state.promise = undefined;
+                notify(state);
+                throw error;
+            },
+        );
+        // Avoid unhandled rejection when only imperative readers are attached
+        state.promise.catch(() => {});
         return;
     }
 
@@ -343,6 +359,8 @@ function applyValue(state: ArtifactState, nextValue: unknown): void {
                 throw error;
             },
         );
+        // Avoid unhandled rejection when only imperative readers are attached
+        state.promise.catch(() => {});
 
         return;
     }
