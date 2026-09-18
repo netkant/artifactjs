@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
+const STORAGE_KEYS = new Set<string>();
 
 /** Cache freshness options for `artifact()`. */
 export interface ArtifactOptions {
@@ -67,6 +68,7 @@ type ArtifactState = {
     updatedAt: number;
     revalidateTimer: ReturnType<typeof setTimeout> | undefined;
     initScratch: InitScratch | null;
+    generation: number;
 };
 
 function createFamily(initializer: unknown, options: ArtifactOptions = {}): ArtifactFamily {
@@ -211,6 +213,7 @@ function getOrCreateState(artifactRef: Artifact): ArtifactState {
         updatedAt: 0,
         revalidateTimer: undefined,
         initScratch: null,
+        generation: 0,
     };
 
     artifactRef.family.instances.set(artifactRef.key, state);
@@ -394,8 +397,15 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
     if (pendingDeps.length > 0) {
         state.status = 'pending';
         state.error = undefined;
+        state.generation++;
+        const expectedGeneration = state.generation;
         state.promise = Promise.all(pendingDeps).then(
             () => {
+                if (state.generation !== expectedGeneration) {
+                    if (state.status === 'pending') return state.promise;
+                    if (state.status === 'rejected') throw state.error;
+                    return state.value;
+                }
                 hydrateStateFromInitializer(state, artifactRef);
                 notify(state);
                 if (state.status === 'pending') return state.promise;
@@ -403,6 +413,9 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
                 return state.value;
             },
             (error: unknown) => {
+                if (state.generation !== expectedGeneration) {
+                    throw error;
+                }
                 state.status = 'rejected';
                 state.error = error;
                 state.promise = undefined;
@@ -441,8 +454,13 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
         clearRevalidateTimer(state);
         state.status = 'pending';
         state.error = undefined;
+        state.generation++;
+        const expectedGeneration = state.generation;
         state.promise = Promise.resolve(nextValue).then(
             (resolvedValue) => {
+                if (state.generation !== expectedGeneration) {
+                    return resolvedValue;
+                }
                 if (state.status === 'resolved' && Object.is(state.value, resolvedValue)) {
                     return resolvedValue;
                 }
@@ -451,6 +469,9 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
                 return resolvedValue;
             },
             (error: unknown) => {
+                if (state.generation !== expectedGeneration) {
+                    throw error;
+                }
                 state.status = 'rejected';
                 state.error = error;
                 state.promise = undefined;
@@ -469,6 +490,7 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
     }
 
     clearRevalidateTimer(state);
+    state.generation++;
     markResolved(state, nextValue);
     return true;
 }
@@ -549,6 +571,16 @@ export function artifactWithStorage<T = undefined>(
     initialValue?: T,
     options: ArtifactStorageOptions<T> = {},
 ): Artifact<T> {
+    if (STORAGE_KEYS.has(key)) {
+        console.warn(
+            `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
+            `Each key should be created only once per application. ` +
+            `Same-tab instances with the same key do not sync via the storage event. ` +
+            `For more information, see the README.`
+        );
+    }
+    STORAGE_KEYS.add(key);
+
     const fallback = initialValue as T;
     const {
         storage: getStorage = () => localStorage,

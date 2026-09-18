@@ -97,4 +97,46 @@ describe('cache freshness (maxAge / revalidate)', () => {
         resolve('done');
         await expect(waitForValue(ref)).resolves.toBe('done');
     });
+
+    it('ignores stale revalidation when new value is written during refresh', async () => {
+        let resolveFirst!: (value: number) => void;
+        let resolveSecond!: (value: number) => void;
+        let callCount = 0;
+
+        const init = vi.fn(() => {
+            callCount++;
+            if (callCount === 1) {
+                return new Promise<number>((r) => {
+                    resolveFirst = r;
+                });
+            }
+            return new Promise<number>((r) => {
+                resolveSecond = r;
+            });
+        });
+
+        const ref = artifact(init, { maxAge: 1_000, revalidate: 'auto' });
+        const listener = vi.fn();
+        subscribeArtifact(ref, listener);
+
+        readArtifact(ref);
+        expect(callCount).toBe(1);
+
+        resolveFirst(1);
+        await waitForValue(ref);
+        expect(readArtifact(ref)).toBe(1);
+
+        const next = waitForValue(ref, (v) => v === 2);
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(callCount).toBe(2);
+
+        resolveSecond(2);
+        await expect(next).resolves.toBe(2);
+        expect(readArtifact(ref)).toBe(2);
+
+        resolveFirst(999);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(readArtifact(ref)).toBe(2);
+    });
 });
