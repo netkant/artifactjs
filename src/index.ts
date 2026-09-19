@@ -745,7 +745,19 @@ export function resetArtifact<T>(candidate: Artifact<T>): void {
     resetState(state, artifactRef);
 }
 
-/** Read the current value synchronously outside React. */
+/**
+ * Read the current value synchronously outside React (imperative "peek").
+ * 
+ * Returns the cached value immediately without suspending or waiting. During revalidation
+ * (when an expired artifact is being refreshed), this returns the **stale previous value**
+ * rather than waiting for the fresh value.
+ * 
+ * Use `resolveArtifact()` if you need to wait for the fresh value, or use React hooks
+ * (`useArtifactValue`) which suspend during revalidation to show a loading state.
+ * 
+ * @returns The current value, or `undefined` if the artifact is pending initial load.
+ * @throws When the artifact initializer has rejected.
+ */
 export function readArtifact<T>(candidate: Artifact<T>): T | undefined {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
@@ -755,6 +767,14 @@ export function readArtifact<T>(candidate: Artifact<T>): T | undefined {
 
 /**
  * Wait until an artifact is resolved, then return its value.
+ * 
+ * If the artifact is currently revalidating (refreshing after expiry), this waits for
+ * the **fresh value** rather than returning the stale cached value immediately.
+ * 
+ * Use this in async contexts (event handlers, async functions, non-React code) when you
+ * need the latest data. For synchronous imperative reads that accept stale values during
+ * revalidation, use `readArtifact()` instead.
+ * 
  * Joins in-flight hydration; rejects if the artifact is/becomes rejected.
  */
 export function resolveArtifact<T>(candidate: Artifact<T>): Promise<T> {

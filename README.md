@@ -273,6 +273,38 @@ const unsubscribe = subscribeArtifact(counterArtifact, () => {
 unsubscribe();
 ```
 
+### Behavior during revalidation
+
+When an artifact with `maxAge` expires and revalidates, React hooks and imperative reads behave differently:
+
+- **React hooks** (`useArtifactValue`, `useArtifact`): **Suspend** during revalidation, showing your `<Suspense>` fallback until the fresh value arrives. This provides a consistent loading experience.
+
+- **Imperative reads** (`readArtifact`): Return the **stale previous value** immediately during revalidation (a synchronous "peek"). This is intentional for non-React code that needs a value right now without awaiting.
+
+- **Promise-based** (`resolveArtifact`): **Waits** for the revalidation to complete and resolves with the fresh value.
+
+**Example:**
+
+```jsx
+const users = artifact(() => fetch('/api/users').then(r => r.json()), { maxAge: 60_000 });
+
+// After expiry, during revalidation:
+
+// React hook suspends (shows loading fallback)
+const UserList = () => {
+    const data = useArtifactValue(users); // Suspends until fresh data arrives
+    return <div>{data.length} users</div>;
+};
+
+// Imperative read returns stale value immediately
+const count = readArtifact(users); // Returns old data during revalidation
+
+// Promise waits for fresh value
+const fresh = await resolveArtifact(users); // Waits for new data
+```
+
+This design prevents blocking in imperative code (scripts, event handlers, non-React contexts) while preserving Suspense semantics for React components.
+
 ## Error handling
 
 If an artifact's initializer throws or a fetch fails, the error propagates to the nearest React Error Boundary:
@@ -313,12 +345,12 @@ Results print to the console. Absolute milliseconds vary by machine; React numbe
 |---|---|---|
 | `artifact(value, options?)` | function | Create an artifact with a static value, promise, or initializer function. Optional `maxAge` / `revalidate` control cache freshness |
 | `artifactWithStorage(key, value?, opts?)` | function | Create an artifact persisted to `localStorage`/`sessionStorage` with cross-tab sync. Initial value is optional (defaults to `undefined`) |
-| `useArtifact(ref)` | hook | Returns `[value, setValue, resetValue]` -- subscribes to changes |
-| `useArtifactValue(ref)` | hook | Returns the current value — subscribes in this component, re-renders on change |
+| `useArtifact(ref)` | hook | Returns `[value, setValue, resetValue]` -- subscribes to changes. Suspends during revalidation |
+| `useArtifactValue(ref)` | hook | Returns the current value — subscribes in this component, re-renders on change. Suspends during revalidation |
 | `useSetArtifact(ref)` | hook | Returns a setter without subscribing in this component — subscribed components still re-render |
 | `useResetArtifact(ref)` | hook | Returns a reset function -- restores initial value or re-fetches |
-| `readArtifact(ref)` | function | Read the current value outside React (sync peek) |
-| `resolveArtifact(ref)` | function | Wait until resolved outside React; rejects on artifact error |
+| `readArtifact(ref)` | function | Read the current value outside React (sync peek). Returns stale value during revalidation |
+| `resolveArtifact(ref)` | function | Wait until resolved outside React; waits for fresh value during revalidation. Rejects on artifact error |
 | `resetArtifact(ref)` | function | Reset to initial value outside React |
 | `writeArtifact(ref, value)` | function | Write a value outside React |
 | `subscribeArtifact(ref, fn)` | function | Subscribe to changes outside React, returns unsubscribe |
