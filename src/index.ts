@@ -701,20 +701,7 @@ export function useArtifactValue<T>(candidate: Artifact<T>): T {
         return state.value as T;
     }, [state]);
 
-    const getServerSnapshot = useCallback(() => {
-        if (state.status === 'pending') {
-            if (!state.promise) {
-                throw new Error('Pending artifact is missing a promise');
-            }
-            throw state.promise;
-        }
-        if (state.status === 'rejected') {
-            throw state.error;
-        }
-        return state.value as T;
-    }, [state]);
-
-    return useSyncExternalStore(subscribeToStore, getSnapshot, getServerSnapshot);
+    return useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 }
 
 /** Return a setter without subscribing in this component. */

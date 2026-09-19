@@ -316,7 +316,7 @@ During SSR, React calls `getServerSnapshot` to determine what value to render on
 - If the values match, hydration succeeds silently
 - If they differ, React logs a hydration mismatch warning and performs a client-side re-render to fix the DOM
 
-**Current behavior:** ArtifactJS provides the same behavior for both server and client snapshots via `useSyncExternalStore`:
+**Current behavior:** ArtifactJS uses the same snapshot function for both server and client, ensuring consistent behavior:
 
 1. **Static artifacts** (`artifact(42)` or `artifact({ theme: "dark" })`) render the same value on server and client
 2. **Async artifacts** suspend on both server and client during pending state, showing the Suspense fallback
@@ -345,7 +345,16 @@ This call immediately attempts to read `localStorage.getItem('theme')`. On the s
 
 **Client-only guidance:**
 
-1. **Create storage artifacts only on the client.** Do not import or initialize `artifactWithStorage` in code that runs during SSR. Use lazy initialization with a guard:
+1. **Disable SSR for components** that use storage artifacts (recommended approach):
+
+```jsx
+import dynamic from 'next/dynamic';
+
+// Next.js: disable SSR for this component
+const ThemeToggle = dynamic(() => import('./ThemeToggle'), { ssr: false });
+```
+
+2. **Alternatively, use lazy initialization with a guard** (requires hook-safe patterns):
 
 ```jsx
 // ✅ Safe: lazily created on first client-side read
@@ -357,21 +366,14 @@ function getThemeArtifact() {
     return themeArtifact;
 }
 
+// Component file marked as client-only to prevent SSR
+'use client';
+
 function ThemeToggle() {
-    const artifact = getThemeArtifact();
-    if (!artifact) return null; // SSR fallback
+    const artifact = getThemeArtifact()!; // Safe: always defined in client components
     const [theme, setTheme] = useArtifact(artifact);
     // ...
 }
-```
-
-2. **Alternatively, disable SSR for components** that use storage artifacts:
-
-```jsx
-import dynamic from 'next/dynamic';
-
-// Next.js: disable SSR for this component
-const ThemeToggle = dynamic(() => import('./ThemeToggle'), { ssr: false });
 ```
 
 **Warning:** Do NOT use `'use client'` with module-level `artifactWithStorage` in Next.js App Router:
@@ -405,13 +407,13 @@ To avoid mismatches, ensure artifacts either:
 
 ### Implementation notes
 
-ArtifactJS uses a dedicated `getServerSnapshot` function in `useSyncExternalStore` that matches the client-side `getSnapshot` behavior:
+ArtifactJS uses `useSyncExternalStore` with the same snapshot function for both server and client rendering:
 
-- **Pending artifacts:** Both server and client suspend (throw promise), showing Suspense fallback
-- **Resolved artifacts:** Both return the resolved value
-- **Rejected artifacts:** Both throw the error, propagating to Error Boundary
+- **Pending artifacts:** Suspend (throw promise) on both server and client, showing Suspense fallback
+- **Resolved artifacts:** Return the resolved value on both server and client
+- **Rejected artifacts:** Throw the error on both server and client, propagating to Error Boundary
 
-This ensures consistent hydration behavior: the server and client render the same initial state, avoiding hydration mismatches for artifacts in any status (pending, resolved, or rejected).
+This ensures consistent hydration behavior: the server and client render identical initial states, avoiding hydration mismatches for artifacts in any status (pending, resolved, or rejected).
 
 ## Error handling
 
