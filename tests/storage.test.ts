@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     artifactWithStorage,
     readArtifact,
+    resetArtifact,
     writeArtifact,
 } from '../src/index';
 
@@ -22,6 +23,13 @@ afterEach(() => {
 });
 
 describe('artifactWithStorage', () => {
+    it('returns a plain artifact object, not a callable factory', () => {
+        const key = uniqueKey('ref-type');
+        const ref = artifactWithStorage(key, 'value');
+        expect(typeof ref).toBe('object');
+        expect(typeof ref).not.toBe('function');
+    });
+
     it('uses the fallback when the key is missing', () => {
         const key = uniqueKey('theme');
         const ref = artifactWithStorage(key, 'light');
@@ -169,5 +177,80 @@ describe('artifactWithStorage', () => {
         );
 
         warnSpy.mockRestore();
+    });
+
+    it('reset re-reads from storage instead of restoring create-time snapshot', () => {
+        const key = uniqueKey('theme');
+        localStorage.setItem(key, JSON.stringify('dark'));
+        const ref = artifactWithStorage(key, 'light');
+        expect(readArtifact(ref)).toBe('dark');
+
+        writeArtifact(ref, 'blue');
+        expect(readArtifact(ref)).toBe('blue');
+
+        localStorage.setItem(key, JSON.stringify('green'));
+        resetArtifact(ref);
+        expect(readArtifact(ref)).toBe('green');
+    });
+
+    it('reset does not overwrite newer storage with stale create-time value', () => {
+        const key = uniqueKey('counter');
+        localStorage.setItem(key, JSON.stringify(10));
+        const ref = artifactWithStorage(key, 0);
+        expect(readArtifact(ref)).toBe(10);
+
+        writeArtifact(ref, 20);
+        expect(readArtifact(ref)).toBe(20);
+        expect(localStorage.getItem(key)).toBe(JSON.stringify(20));
+
+        localStorage.setItem(key, JSON.stringify(99));
+        resetArtifact(ref);
+        expect(readArtifact(ref)).toBe(99);
+        expect(localStorage.getItem(key)).toBe(JSON.stringify(99));
+    });
+
+    it('reset picks up fallback when storage key is deleted externally', () => {
+        const key = uniqueKey('optional');
+        localStorage.setItem(key, JSON.stringify('exists'));
+        const ref = artifactWithStorage(key, 'fallback');
+        expect(readArtifact(ref)).toBe('exists');
+
+        localStorage.removeItem(key);
+        resetArtifact(ref);
+        expect(readArtifact(ref)).toBe('fallback');
+        
+        // The fallback is written back to storage by the subscriber
+        expect(localStorage.getItem(key)).toBe(JSON.stringify('fallback'));
+    });
+
+    it('resumes persistence after a storage event throws during deserialization', () => {
+        const key = uniqueKey('event-throw');
+        let deserializeCallCount = 0;
+
+        localStorage.setItem(key, JSON.stringify('initial'));
+
+        const ref = artifactWithStorage(key, 'fallback', {
+            deserialize: (v: string) => {
+                deserializeCallCount++;
+                if (deserializeCallCount === 2) {
+                    throw new Error('deserialize error');
+                }
+                return JSON.parse(v) as string;
+            },
+        });
+
+        expect(readArtifact(ref)).toBe('initial');
+
+        window.dispatchEvent(
+            new StorageEvent('storage', {
+                key,
+                newValue: JSON.stringify('from-event'),
+                storageArea: localStorage,
+            }),
+        );
+
+        writeArtifact(ref, 'after-error');
+        expect(localStorage.getItem(key)).toBe(JSON.stringify('after-error'));
+        expect(readArtifact(ref)).toBe('after-error');
     });
 });

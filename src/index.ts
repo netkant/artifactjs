@@ -280,8 +280,10 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
 
     if (error) {
         const statusChanged = state.status !== 'rejected' || state.error !== error;
+        state.generation++;
         state.status = 'rejected';
         state.error = error;
+        state.promise = undefined;
         if (depsChanged) {
             wireDepSubscriptions(state, artifactRef, depStates);
         }
@@ -431,8 +433,10 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
     }
 
     if (error) {
+        state.generation++;
         state.status = 'rejected';
         state.error = error;
+        state.promise = undefined;
         wireDepSubscriptions(state, artifactRef, depStates);
         return;
     }
@@ -620,7 +624,8 @@ export function artifactWithStorage<T = undefined>(
         }
     }
 
-    const base = artifact(readFromStorage());
+    const factory = artifact(() => readFromStorage());
+    const base = createArtifactRef(factory.family) as Artifact<T>;
     const state = getOrCreateState(base);
 
     let syncing = false;
@@ -644,8 +649,9 @@ export function artifactWithStorage<T = undefined>(
 
                 syncing = true;
                 writeState(state, next);
-                syncing = false;
             } catch {
+                // Deserialization or write failure
+            } finally {
                 syncing = false;
             }
         });

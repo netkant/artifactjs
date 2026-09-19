@@ -92,4 +92,32 @@ describe('derived artifacts', () => {
         expect(listener).not.toHaveBeenCalled();
     });
 
+    it('rejects sync error in recompute even when old Promise resolves later', async () => {
+        let resolveSlowPromise: (value: number) => void;
+        const slowPromise = new Promise<number>((resolve) => {
+            resolveSlowPromise = resolve;
+        });
+
+        const source = artifact(0);
+        const derived = artifact(({ get }) => {
+            const val = get(source);
+            if (val === 0) {
+                return slowPromise;
+            }
+            throw new Error('sync error');
+        });
+
+        const initialRead = readArtifact(derived);
+        expect(initialRead).toBeUndefined();
+
+        writeArtifact(source, 1);
+
+        expect(() => readArtifact(derived)).toThrow('sync error');
+
+        resolveSlowPromise!(42);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        expect(() => readArtifact(derived)).toThrow('sync error');
+    });
+
 });
