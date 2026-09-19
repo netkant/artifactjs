@@ -211,7 +211,7 @@ function createCircularDependencyError(state: ArtifactState): Error {
     const displayKey = key === DEFAULT_KEY ? '(default)' : key;
     
     return new Error(
-        `Circular dependency detected: artifact with key ${displayKey} depends on itself. ` +
+        `Circular dependency detected: artifact with key ${displayKey} is part of a dependency cycle. ` +
         `Check your artifact initializers for cycles in the dependency graph.`
     );
 }
@@ -388,8 +388,20 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
     }
 
     // Check for circular dependency before entering computation
+    // If detected, mark as rejected and return without notifying (to prevent infinite recursion)
     if (COMPUTATION_STACK.has(state)) {
-        throw createCircularDependencyError(state);
+        const error = createCircularDependencyError(state);
+        const statusChanged = state.status !== 'rejected' || state.error !== error;
+        if (statusChanged) {
+            state.generation++;
+            state.status = 'rejected';
+            state.error = error;
+            state.promise = undefined;
+            // Build new loadable for rejected state
+            state.cachedLoadable = { status: 'rejected', value: undefined, error };
+            // Note: we deliberately don't notify here to avoid infinite recursion
+        }
+        return;
     }
 
     // Add to computation stack
@@ -540,11 +552,6 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
     if (typeof initializer !== 'function') {
         applyValue(state, initializer);
         return;
-    }
-
-    // Check for circular dependency before entering computation
-    if (COMPUTATION_STACK.has(state)) {
-        throw createCircularDependencyError(state);
     }
 
     teardownDeps(state);

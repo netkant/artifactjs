@@ -609,7 +609,7 @@ When the user clicks "Retry", `resetUsers()` re-fetches the data and `resetError
 
 ### Circular dependencies
 
-Artifact detects circular dependencies in derived artifacts automatically. If artifact A depends on B, and B depends on A (directly or through a chain), a clear error is thrown:
+Artifact detects circular dependencies in derived artifacts automatically. If artifact A depends on B, and B depends on A (directly or through a chain of dependencies), a clear error is thrown:
 
 ```jsx
 const a = artifact(({ get }) => get(b) + 1);

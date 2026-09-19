@@ -113,8 +113,11 @@ describe('circular dependency detection', () => {
         expect(readArtifact(a)).toBe(10);
         expect(readArtifact(b)).toBe(20);
 
-        // Now create a cycle by toggling - the cycle is detected immediately during recomputation
-        expect(() => writeArtifact(toggle, true)).toThrow(/Circular dependency detected/);
+        // Now create a cycle by toggling - this triggers recomputation of a
+        writeArtifact(toggle, true);
+
+        // The cycle is detected when we try to read a, causing it to be rejected
+        expect(() => readArtifact(a)).toThrow(/Circular dependency detected/);
     });
 
     it('provides helpful error message with artifact key', () => {
@@ -129,7 +132,7 @@ describe('circular dependency detection', () => {
             const message = (error as Error).message;
             expect(message).toMatch(/Circular dependency detected/);
             expect(message).toMatch(/artifact with key/);
-            expect(message).toMatch(/depends on itself/);
+            expect(message).toMatch(/is part of a dependency cycle/);
             expect(message).toMatch(/Check your artifact initializers/);
         }
     });
