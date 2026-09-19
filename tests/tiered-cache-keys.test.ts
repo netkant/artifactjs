@@ -317,6 +317,16 @@ describe('tiered cache keys', () => {
             expect(init).toHaveBeenCalledTimes(2);
         });
 
+        it('does not collide flat object {a:"1,\\"b\\":s:2"} with {a:"1",b:"2"}', async () => {
+            const init = vi.fn(async (params: any) => params);
+            const data = artifact(init);
+
+            await waitForValue(data({ a: '1,"b":s:2' }));
+            await waitForValue(data({ a: '1', b: '2' }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
         it('does not collide flat object with nested object', async () => {
             const init = vi.fn(async (params: any) => params);
             const data = artifact(init);

@@ -81,7 +81,8 @@ function fastFlatObjectKey(obj: Record<string, unknown>): string {
         } else {
             const t = typeof val;
             if (t === 'string') {
-                taggedVal = `s:${val}`;
+                // JSON.stringify string values to escape delimiters
+                taggedVal = `s:${JSON.stringify(val)}`;
             } else if (t === 'number') {
                 taggedVal = `n:${val}`;
             } else if (t === 'boolean') {

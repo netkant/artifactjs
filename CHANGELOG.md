@@ -24,10 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Documentation**: Expanded README guidance on `maxEntries` for parameterized artifacts to clarify when and why developers should set finite limits (recommended: 200–500 for dynamic ID / infinite-scroll use cases), while emphasizing that the unlimited default (Infinity) remains unchanged for backward compatibility
 - **Performance**: Optimized default cache key generation with tiered fast paths:
-  - Single primitives (string/number/boolean/null/undefined/bigint): 70% faster via tagged keys (`p:n:1`, `p:s:hello`)
-  - Flat objects (one level, primitives only): 49% faster via sorted keys with stable prefix (`f:`)
+  - Single primitives (string/number/boolean/null/undefined/bigint): 73% faster via tagged keys (`p:n:1`, `p:s:"hello"`)
+  - Flat objects (one level, primitives only): 17% faster via sorted keys with type-tagged values (`f:"id":n:1`)
   - Nested/exotic types (Date/Map/Set/array/nested objects): unchanged fallback to `stableStringify`
-  - Overall speedup: ~49% for realistic mixed params
+  - Overall speedup: ~19% for realistic mixed params
   - Cache key format intentionally changed (session-only; no persistence implications)
   
 ### Fixed
