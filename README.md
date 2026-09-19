@@ -355,6 +355,114 @@ const fresh = await resolveArtifact(users); // Waits for new data
 
 This design prevents blocking in imperative code (scripts, event handlers, non-React contexts) while preserving Suspense semantics for React components.
 
+## SSR and hydration
+
+ArtifactJS uses React's `useSyncExternalStore` under the hood, which provides built-in support for server-side rendering (SSR) and hydration. Understanding how artifacts behave during SSR is important for building universal React applications.
+
+### Server vs. client snapshots
+
+During SSR, React calls `getServerSnapshot` to determine what value to render on the server. After hydration on the client, React calls `getSnapshot` to get the client-side value and compares them:
+
+- If the values match, hydration succeeds silently
+- If they differ, React logs a hydration mismatch warning and performs a client-side re-render to fix the DOM
+
+**Current behavior:** ArtifactJS uses the same snapshot function for both server and client, ensuring consistent behavior:
+
+1. **Static artifacts** (`artifact(42)` or `artifact({ theme: "dark" })`) render the same value on server and client
+2. **Async artifacts** suspend on both server and client during pending state, showing the Suspense fallback
+3. **Rejected artifacts** throw errors on both server and client, propagating to the nearest Error Boundary
+4. **Derived artifacts** that depend only on static or already-resolved artifacts hydrate correctly
+
+### Module-level mutable state
+
+Artifacts store their state in a **module-level mutable store** (`Map` inside each artifact family). This has important SSR implications:
+
+- **On the server:** Module state may persist between requests depending on your framework. **Verify that your runtime isolates or clears module state between requests; do not assume the shared store is request-safe without confirming your framework's behavior.** Some frameworks (e.g., Next.js App Router) aim to provide per-request module isolation, but exact behavior can vary.
+- **On the client:** The module is loaded once per page, and artifact state persists for the lifetime of the page (until reload or navigation)
+- **Hydration:** The client starts with its own fresh module state. Server-rendered values are not automatically transferred to the client — the client re-initializes each artifact from scratch on mount
+
+**Note:** ArtifactJS does not currently have SSR-specific tests. The library relies on React's `useSyncExternalStore` for SSR compatibility. If you encounter issues with your SSR framework, please report them on GitHub.
+
+### Storage artifacts and SSR
+
+`artifactWithStorage` reads from `localStorage` (or `sessionStorage`) at **creation time**:
+
+```jsx
+const themeArtifact = artifactWithStorage('theme', 'light');
+```
+
+This call immediately attempts to read `localStorage.getItem('theme')`. On the server, `localStorage` does not exist, which will cause a runtime error.
+
+**Client-only guidance:**
+
+The recommended approach is to disable SSR for components that use storage artifacts:
+
+```jsx
+import dynamic from 'next/dynamic';
+
+// Next.js: disable SSR for this component
+const ThemeToggle = dynamic(() => import('./ThemeToggle'), { ssr: false });
+```
+
+Inside `ThemeToggle.tsx` (which now only runs on the client), you can safely use lazy initialization:
+
+```jsx
+// ThemeToggle.tsx - only runs client-side due to dynamic import above
+import { artifactWithStorage, useArtifact } from '@urlund/artifactjs';
+
+let themeArtifact;
+function getThemeArtifact() {
+    if (!themeArtifact) {
+        themeArtifact = artifactWithStorage('theme', 'light');
+    }
+    return themeArtifact;
+}
+
+export default function ThemeToggle() {
+    const [theme, setTheme] = useArtifact(getThemeArtifact());
+    return <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme}</button>;
+}
+```
+
+**Warning:** Do NOT use `'use client'` with module-level `artifactWithStorage` in Next.js App Router:
+
+```jsx
+// ❌ UNSAFE: Module code runs during SSR even in 'use client' components
+'use client';
+import { artifactWithStorage, useArtifact } from '@urlund/artifactjs';
+
+const themeArtifact = artifactWithStorage('theme', 'light'); // ❌ Crashes on server!
+
+export function ThemeToggle() {
+    const [theme, setTheme] = useArtifact(themeArtifact);
+    // ...
+}
+```
+
+The `'use client'` directive only marks the component boundary—module-level code still executes during SSR and will crash when accessing `localStorage`.
+
+### Hydration mismatches
+
+If an artifact's value differs between server render and client mount, React will warn about a hydration mismatch. Common causes:
+
+- **Time-dependent values:** `artifact(new Date())` or `artifact(Math.random())` will differ between server and client
+- **Browser APIs:** Artifacts that read `window`, `navigator`, or other client-only globals during initialization
+- **Storage artifacts** (if improperly used during SSR, though this should error rather than mismatch)
+
+To avoid mismatches, ensure artifacts either:
+- Return the same value on server and client (static values, deterministic derived values)
+- Are only used in client-only components (guarded with `typeof window !== 'undefined'` or framework-specific client-only wrappers)
+
+### Implementation notes
+
+ArtifactJS uses `useSyncExternalStore` with the same snapshot function for both server and client rendering:
+
+- **Pending artifacts:** Suspend (throw promise) on both server and client, showing Suspense fallback
+- **Resolved artifacts:** Return the resolved value on both server and client
+- **Rejected artifacts:** Throw the error on both server and client, propagating to Error Boundary
+
+This ensures consistent hydration behavior: the server and client render identical initial states, avoiding hydration mismatches for artifacts in any status (pending, resolved, or rejected).
+
 ## Error handling
 
 If an artifact's initializer throws or a fetch fails, the error propagates to the nearest React Error Boundary:
