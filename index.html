@@ -423,7 +423,7 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
 <div class="wrapper">
   <div class="section-label">Migration</div>
   <h2>Coming from Jotai or Recoil?</h2>
-  <p>Artifact has the same atomic model &mdash; define state outside components, subscribe inside &mdash; but with a simpler API, native Suspense via React 19+'s <code>use()</code>, and zero dependencies.</p>
+  <p>Artifact has the same atomic model &mdash; define state outside components, subscribe inside &mdash; but with a simpler API, native Suspense support, and zero dependencies.</p>
 
   <h3>Side-by-side: Jotai vs Artifact</h3>
 
@@ -462,7 +462,7 @@ footer{border-top:1px solid var(--border);padding:40px 0;text-align:center;color
 <pre><code><span class="kw">const</span> usersArtifact = <span class="fn">artifact</span>(() =&gt;
     <span class="fn">fetch</span>(<span class="str">'/api/users'</span>).<span class="fn">then</span>(r =&gt; r.<span class="fn">json</span>())
 );
-<span class="cm">// Same &lt;Suspense&gt; support, native use()</span></code></pre>
+<span class="cm">// Same &lt;Suspense&gt; support</span></code></pre>
     </div>
   </div>
 
