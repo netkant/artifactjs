@@ -16,7 +16,7 @@ export function waitForValue<T>(ref: Artifact<T>, expect?: (value: T) => boolean
 
     try {
         const current = readArtifact(ref);
-        if (matches(current) && !expect) {
+        if (matches(current)) {
             return Promise.resolve(current);
         }
     } catch (error) {
@@ -40,7 +40,7 @@ export function waitForValue<T>(ref: Artifact<T>, expect?: (value: T) => boolean
         // Kick off hydration if still pending
         try {
             const value = readArtifact(ref);
-            if (matches(value) && !expect) {
+            if (matches(value)) {
                 unsub();
                 resolve(value);
             }

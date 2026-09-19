@@ -101,8 +101,8 @@ describe('readArtifact during revalidation', () => {
         // readArtifact provides stale value for imperative code (does not suspend)
         expect(readArtifact(ref)).toBe(1);
         
-        // This is the documented stale-while-revalidate behavior for imperative reads
-        // (React hooks would suspend instead, but that's tested in hooks.test.tsx)
+        // This is the documented stale-while-revalidate behavior for imperative reads.
+        // React hooks would suspend instead during revalidation.
         
         // Wait for fresh value
         await waitForValue(ref, (v) => v === 2);
