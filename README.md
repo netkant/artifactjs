@@ -127,32 +127,51 @@ const userArtifact = artifact(
 | `key` | Stable `JSON.stringify` with sorted keys | Function that takes params and returns a cache key string |
 | `maxEntries` | `Infinity` (unlimited) | Soft LRU cap on parameterized instances. Set to a number to enable automatic eviction. When exceeded, evicts least-recently-used instances that have no active subscribers and are not pending |
 
-**Eviction behavior:**
+#### When to set `maxEntries`
 
-When `maxEntries` is set to a finite number and the limit is reached, Artifact evicts the least-recently-used instance **only if it has no subscribers and is not pending**. Instances are touched (moved to the end of the LRU queue) on every read, write, or subscribe. If all instances have active subscribers or are pending async operations when the limit is reached, no eviction occurs and the cache can temporarily grow beyond `maxEntries`.
+**Why the default is unlimited:** Artifact keeps `maxEntries: Infinity` by default to preserve backward-compatible behavior. This ensures existing code continues to work exactly as it did before the option was introduced. Memory management is opt-in, not automatic.
 
-Invalid `maxEntries` values (<= 0, NaN) are treated as `Infinity` (unlimited). Setting `maxEntries: false` is an alias for `Infinity`.
+**When you should set a finite limit:** If your application creates **many unique parameterized instances** over time, you should set `maxEntries` to avoid unbounded memory growth. Common scenarios include:
 
-**Opt-in example:**
+- **User profiles or feeds** — `userArtifact({ id: userId })` for different users as they browse
+- **Post or item detail pages** — `postArtifact({ id: postId })` across many posts
+- **Infinite scroll or pagination** — `pageArtifact({ page: n })` accumulating pages over time
+- **Route-based caches** — `routeDataArtifact({ path })` for dynamic routing
 
-For applications that create many parameterized instances, set `maxEntries` to enable automatic memory management:
+Without a limit, each unique parameter set stays in memory indefinitely (until page reload), even after the user navigates away.
+
+**Recommended starting values:** For applications with dynamic IDs or unbounded parameter sets, start with **`maxEntries: 200–500`**. This range provides a large enough cache for typical navigation patterns while preventing memory leaks from hundreds or thousands of stale instances. Adjust based on your app's usage:
+
+- **200** — Conservative limit for memory-constrained environments or apps with very large cached values
+- **500** — Generous limit for most use cases, balancing memory and cache hit rates
+
+Remember: eviction only removes **unsubscribed, non-pending** instances. Active instances are never evicted, so the cache can temporarily exceed `maxEntries` if all instances are in use.
+
+**Example with finite limit:**
 
 ```jsx
-// Limit to 500 cached user instances
+// User profile cache with 500-instance limit
 const userArtifact = artifact(
     ({ id }) => fetch(`/api/users/${id}`).then((res) => res.json()),
     { maxEntries: 500 },
 );
 
-// Limit with custom key
+// Post cache with custom key and 300-instance limit
 const postArtifact = artifact(
-    ({ id }) => fetch(`/api/posts/${id}`).then((res) => res.json()),
-    { 
-        key: ({ id }) => `post:${id}`,
-        maxEntries: 200 
+    ({ postId, commentPage = 1 }) =>
+        fetch(`/api/posts/${postId}?comments_page=${commentPage}`).then((r) => r.json()),
+    {
+        key: ({ postId, commentPage }) => `post:${postId}:comments:${commentPage}`,
+        maxEntries: 300,
     },
 );
 ```
+
+**Eviction behavior:**
+
+When `maxEntries` is set to a finite number and the limit is reached, Artifact evicts the least-recently-used instance **only if it has no subscribers and is not pending**. Instances are touched (moved to the end of the LRU queue) on every read, write, or subscribe. If all instances have active subscribers or are pending async operations when the limit is reached, no eviction occurs and the cache can temporarily grow beyond `maxEntries`.
+
+Invalid `maxEntries` values (<= 0, NaN) are treated as `Infinity` (unlimited). Setting `maxEntries: false` is an alias for `Infinity`.
 
 Non-parameterized (static or promise) artifacts are unaffected by `maxEntries` and never auto-evict.
 

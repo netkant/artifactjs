@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `maxEntries`: Soft LRU cap on parameterized instances with automatic eviction of unsubscribed, non-pending instances (default: Infinity / unlimited)
   - Improved default key generation to properly handle Date, RegExp, Map, and Set objects
   - `useSetArtifact` and `useResetArtifact` now pin instances to prevent LRU eviction while hooks are mounted
+
+### Changed
+
+- **Documentation**: Expanded README guidance on `maxEntries` for parameterized artifacts to clarify when and why developers should set finite limits (recommended: 200–500 for dynamic ID / infinite-scroll use cases), while emphasizing that the unlimited default (Infinity) remains unchanged for backward compatibility
   
 ### Fixed
 
