@@ -1,6 +1,6 @@
 import { renderToString } from 'react-dom/server';
 import { Component, Suspense, type ReactNode } from 'react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
     artifact,
     artifactWithStorage,
@@ -31,9 +31,9 @@ class TestErrorBoundary extends Component<
     }
 }
 
-describe('SSR and hydration', () => {
+describe('SSR behavior', () => {
     describe('static artifacts', () => {
-        it('server render and client snapshot agree (no hydration mismatch)', () => {
+        it('SSR HTML contains artifact value', () => {
             const userArtifact = artifact({ name: 'Alice', id: 42 });
 
             function UserProfile() {
@@ -41,16 +41,16 @@ describe('SSR and hydration', () => {
                 return <div data-testid="user">{user.name}</div>;
             }
 
-            // Server render
+            // Server render produces HTML with the artifact value
             const serverHTML = renderToString(<UserProfile />);
             expect(serverHTML).toContain('Alice');
 
-            // Client should get the same value (same snapshot)
-            const clientValue = readArtifact(userArtifact);
-            expect(clientValue).toEqual({ name: 'Alice', id: 42 });
+            // Same-process read sees the same value
+            const sameProcessValue = readArtifact(userArtifact);
+            expect(sameProcessValue).toEqual({ name: 'Alice', id: 42 });
         });
 
-        it('static primitives hydrate consistently', () => {
+        it('static primitives render in SSR output', () => {
             const countArtifact = artifact(100);
             const nameArtifact = artifact('Bob');
 
@@ -69,7 +69,7 @@ describe('SSR and hydration', () => {
             expect(serverHTML).toContain('100');
             expect(serverHTML).toContain('Bob');
 
-            // Verify client reads match server
+            // Same-process reads match SSR output
             expect(readArtifact(countArtifact)).toBe(100);
             expect(readArtifact(nameArtifact)).toBe('Bob');
         });
@@ -290,12 +290,8 @@ describe('SSR and hydration', () => {
         });
     });
 
-    describe('server/client snapshot consistency', () => {
-        it('useSyncExternalStore gets same snapshot on server and client', () => {
-            // This is the core mechanism that prevents hydration mismatches
-            // The library uses useSyncExternalStore with getSnapshot and getServerSnapshot
-            // For artifacts, both should return the same value
-            
+    describe('SSR output consistency', () => {
+        it('static artifact value appears in SSR HTML', () => {
             const staticArtifact = artifact('consistent-value');
 
             function TestComponent() {
@@ -303,16 +299,15 @@ describe('SSR and hydration', () => {
                 return <div>{value}</div>;
             }
 
-            // Server render
             const serverHTML = renderToString(<TestComponent />);
             expect(serverHTML).toContain('consistent-value');
 
-            // Client should see the same value (no mismatch warning)
-            const clientValue = readArtifact(staticArtifact);
-            expect(clientValue).toBe('consistent-value');
+            // Same-process read gets the same value
+            const sameProcessValue = readArtifact(staticArtifact);
+            expect(sameProcessValue).toBe('consistent-value');
         });
 
-        it('derived artifacts are consistent across server and client', () => {
+        it('derived artifacts compute correctly in SSR', () => {
             const base = artifact(5);
             const derived = artifact(({ get }) => {
                 const val = get(base);
@@ -328,15 +323,15 @@ describe('SSR and hydration', () => {
             // React 19 adds comments around numbers in SSR: <!-- -->10
             expect(serverHTML).toMatch(/<div>Result:\s*(?:<!--[^>]*-->)?10/);
 
-            // Client should compute the same derived value
-            const clientValue = readArtifact(derived);
-            expect(clientValue).toBe(10);
+            // Same-process read computes the same derived value
+            const sameProcessValue = readArtifact(derived);
+            expect(sameProcessValue).toBe(10);
         });
 
-        it('modified artifact on server reflects in SSR output', () => {
+        it('modified artifact value reflects in SSR output', () => {
             const mutableArtifact = artifact(0);
             
-            // Modify before SSR (simulating server-side initialization)
+            // Modify before SSR
             writeArtifact(mutableArtifact, 999);
 
             function Component() {
@@ -351,14 +346,14 @@ describe('SSR and hydration', () => {
     });
 
     describe('mutable store SSR caveats', () => {
-        it('documents that modified artifacts retain state across SSR renders', () => {
+        it('module-level artifacts retain state across renderToString calls', () => {
             // README documents: "module-level mutable store SSR caveats"
-            // Artifacts are mutable and shared globally
-            // In SSR, this means state persists across requests if not reset
+            // Artifacts are mutable and shared in the module scope
+            // State persists across multiple renderToString calls in the same process
             
             const sharedCounter = artifact(0);
             
-            // Simulate first request
+            // First render
             writeArtifact(sharedCounter, 1);
             
             function CounterComponent() {
@@ -370,27 +365,25 @@ describe('SSR and hydration', () => {
             // React 19 adds comments around numbers: <!-- -->1
             expect(html1).toMatch(/<div>Count:\s*(?:<!--[^>]*-->)?1/);
             
-            // Simulate second request (same process)
-            // Counter still has value from previous request
+            // Second render (same process, same artifact instance)
+            // Counter still has value from previous render
             const html2 = renderToString(<CounterComponent />);
             expect(html2).toMatch(/<div>Count:\s*(?:<!--[^>]*-->)?1/); // State persisted!
             
-            // This demonstrates why artifacts should be request-scoped in SSR
-            // or reset between requests in real server implementations
+            // This demonstrates the shared-store caveat: artifacts are not
+            // automatically reset between renders
         });
 
-        it('fresh artifact instances are isolated per request pattern', () => {
-            // Safe SSR pattern: create fresh artifacts per request
-            const createRequestArtifact = () => artifact(0);
+        it('new artifact() calls are independent', () => {
+            // Each artifact() call creates a new family/store
+            const artifact1 = artifact(0);
+            const artifact2 = artifact(0);
             
-            // Request 1
-            const artifact1 = createRequestArtifact();
             writeArtifact(artifact1, 1);
             expect(readArtifact(artifact1)).toBe(1);
             
-            // Request 2
-            const artifact2 = createRequestArtifact();
-            expect(readArtifact(artifact2)).toBe(0); // Fresh state
+            // Different artifact() call = different store
+            expect(readArtifact(artifact2)).toBe(0);
         });
     });
 });
