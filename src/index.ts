@@ -10,7 +10,7 @@ export interface ArtifactOptions {
     revalidate?: 'on-read' | 'auto';
     /** Stable cache key for parameterized instances. Default: deterministic JSON.stringify with sorted object keys. */
     key?: (params: any) => string;
-    /** Soft LRU cap on parameterized instances. Default: 500 for parameterized factories, Infinity for static/promise artifacts. Set to Infinity or false to disable. Evict only unsubscribed instances. */
+    /** Soft LRU cap on parameterized instances. Default: Infinity (unlimited). Opt-in to a finite limit by setting a number. Set to false to explicitly disable. Evicts only unsubscribed, non-pending instances. */
     maxEntries?: number | false;
 }
 
@@ -715,7 +715,10 @@ export function artifactWithStorage<T = undefined>(
     const compositeKey = `${storageBackend === sessionStorage ? 'session' : 'local'}:${key}`;
 
     if (STORAGE_KEYS.has(compositeKey)) {
-        if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        // Warn in development about duplicate storage keys
+        // @ts-expect-error - process is not available in browser, but fine to check
+        const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+        if (isDev) {
             console.warn(
                 `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
                 `Each key should be created only once per application. ` +
@@ -789,8 +792,9 @@ export function artifact<T>(promise: Promise<T>, options?: ArtifactOptions): Art
 /** Create an artifact from a static value. */
 export function artifact<T>(value: T, options?: ArtifactOptions): Artifact<T>;
 export function artifact(initializer: unknown, options: ArtifactOptions = {}): Artifact | ArtifactFactory<unknown> {
-    // Default maxEntries to 500 for parameterized functions, Infinity for static/promise artifacts
-    const defaultMaxEntries = typeof initializer === 'function' ? 500 : Infinity;
+    // Default maxEntries to Infinity (unlimited) for all artifacts
+    // Users can opt-in to a finite limit with maxEntries: <number>
+    const defaultMaxEntries = Infinity;
     // Treat false as Infinity (disable eviction)
     // Treat invalid values (<= 0, NaN) as Infinity (disable eviction)
     let maxEntries: number;

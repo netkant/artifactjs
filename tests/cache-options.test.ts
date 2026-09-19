@@ -260,9 +260,28 @@ describe('parameterized cache options', () => {
             expect(init).toHaveBeenCalledTimes(100);
         });
 
-        it('defaults to maxEntries of 500 for parameterized artifacts', async () => {
+        it('defaults to unlimited maxEntries for parameterized artifacts', async () => {
             const init = vi.fn(async ({ id }: { id: number }) => ({ id }));
             const user = artifact(init);
+
+            for (let i = 1; i <= 600; i++) {
+                await waitForValue(user({ id: i }));
+            }
+
+            expect(init).toHaveBeenCalledTimes(600);
+
+            // All 600 instances should still be cached (no eviction with default)
+            for (let i = 1; i <= 600; i++) {
+                const cached = readArtifact(user({ id: i }));
+                expect(cached).toEqual({ id: i });
+            }
+
+            expect(init).toHaveBeenCalledTimes(600);
+        });
+
+        it('supports opt-in maxEntries with finite limit', async () => {
+            const init = vi.fn(async ({ id }: { id: number }) => ({ id }));
+            const user = artifact(init, { maxEntries: 500 });
 
             for (let i = 1; i <= 501; i++) {
                 await waitForValue(user({ id: i }));
@@ -270,10 +289,12 @@ describe('parameterized cache options', () => {
 
             expect(init).toHaveBeenCalledTimes(501);
 
+            // First instance should be evicted
             const shouldBeEvicted = await waitForValue(user({ id: 1 }));
             expect(shouldBeEvicted).toEqual({ id: 1 });
             expect(init).toHaveBeenCalledTimes(502);
 
+            // Last instance should still be cached
             const shouldBeCached = readArtifact(user({ id: 501 }));
             expect(shouldBeCached).toEqual({ id: 501 });
             expect(init).toHaveBeenCalledTimes(502);
