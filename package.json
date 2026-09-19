@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
+    "@types/node": "^26.6.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "jotai": "^2.20.3",

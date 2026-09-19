@@ -67,6 +67,116 @@ describe('async artifacts', () => {
         writeArtifact(ref, 'local');
         expect(readArtifact(ref)).toBe('local');
     });
+
+    it('ignores stale promise when a faster promise settles first', async () => {
+        let slowResolve!: (value: string) => void;
+        let fastResolve!: (value: string) => void;
+
+        const slowPromise = new Promise<string>((r) => {
+            slowResolve = r;
+        });
+        const fastPromise = new Promise<string>((r) => {
+            fastResolve = r;
+        });
+
+        const ref = artifact(slowPromise);
+        expect(readArtifact(ref)).toBeUndefined();
+
+        writeArtifact(ref, fastPromise);
+
+        fastResolve('fast');
+        await waitForValue(ref);
+        expect(readArtifact(ref)).toBe('fast');
+
+        slowResolve('slow');
+        await new Promise((r) => setTimeout(r, 10));
+        expect(readArtifact(ref)).toBe('fast');
+    });
+
+    it('ignores stale promise when overwritten with a sync value', async () => {
+        let resolve!: (value: string) => void;
+        const promise = new Promise<string>((r) => {
+            resolve = r;
+        });
+
+        const ref = artifact(promise);
+        expect(readArtifact(ref)).toBeUndefined();
+
+        writeArtifact(ref, 'sync-value');
+        expect(readArtifact(ref)).toBe('sync-value');
+
+        resolve('async-value');
+        await new Promise((r) => setTimeout(r, 10));
+        expect(readArtifact(ref)).toBe('sync-value');
+    });
+
+    it('does not surface error when slow promise rejects after newer sync overwrite', async () => {
+        let reject!: (error: Error) => void;
+        const promise = new Promise<string>((_, r) => {
+            reject = r;
+        });
+
+        const ref = artifact(promise);
+        expect(readArtifact(ref)).toBeUndefined();
+
+        writeArtifact(ref, 'new-value');
+        expect(readArtifact(ref)).toBe('new-value');
+
+        reject(new Error('old error'));
+        await new Promise((r) => setTimeout(r, 10));
+        
+        expect(readArtifact(ref)).toBe('new-value');
+        expect(() => readArtifact(ref)).not.toThrow();
+    });
+
+    it('ignores stale reset when new value is written during async hydration', async () => {
+        let resolveFirst!: (value: string) => void;
+        let resolveSecond!: (value: string) => void;
+        let callCount = 0;
+
+        const ref = artifact(() => {
+            callCount++;
+            if (callCount === 1) {
+                return new Promise<string>((r) => {
+                    resolveFirst = r;
+                });
+            }
+            return new Promise<string>((r) => {
+                resolveSecond = r;
+            });
+        });
+
+        readArtifact(ref);
+        expect(callCount).toBe(1);
+
+        resetArtifact(ref);
+        expect(callCount).toBe(2);
+
+        resolveSecond('second');
+        await waitForValue(ref);
+        expect(readArtifact(ref)).toBe('second');
+
+        resolveFirst('first');
+        await new Promise((r) => setTimeout(r, 10));
+        expect(readArtifact(ref)).toBe('second');
+    });
+
+    it('resolveArtifact returns newer value when slow promise resolves after sync write', async () => {
+        let resolveAsync!: (value: string) => void;
+        const slowPromise = new Promise<string>((r) => {
+            resolveAsync = r;
+        });
+
+        const ref = artifact(slowPromise);
+        const p = resolveArtifact(ref);
+
+        writeArtifact(ref, 'newer-sync-value');
+        expect(readArtifact(ref)).toBe('newer-sync-value');
+
+        resolveAsync('slow-async-value');
+        await expect(p).resolves.toBe('newer-sync-value');
+        expect(readArtifact(ref)).toBe('newer-sync-value');
+    });
 });
 
 describe('resolveArtifact', () => {

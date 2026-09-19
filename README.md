@@ -156,6 +156,8 @@ When a value expires, Artifact hard-refreshes it (same as `resetArtifact`): asyn
 
 Use `artifactWithStorage` to persist a value to `localStorage` (default) or `sessionStorage`. The stored value is read on creation, written on every update, and synced across browser tabs automatically. The initial value is optional — when omitted (or the key is missing), the value is `undefined`:
 
+**Important:** Each storage key should be created only once per application. If you call `artifactWithStorage` with the same key multiple times in the same tab, those instances will not sync with each other via the `storage` event (the event only fires for changes from other tabs). A console warning will be shown in development when duplicate keys are detected.
+
 ```jsx
 import { artifactWithStorage } from '@urlund/artifactjs';
 

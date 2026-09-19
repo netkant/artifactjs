@@ -151,4 +151,23 @@ describe('artifactWithStorage', () => {
         expect(() => writeArtifact(ref, 'new')).not.toThrow();
         expect(readArtifact(ref)).toBe('new');
     });
+
+    it('warns when the same storage key is used twice', () => {
+        const key = uniqueKey('duplicate');
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        artifactWithStorage(key, 'first');
+        expect(warnSpy).not.toHaveBeenCalled();
+
+        artifactWithStorage(key, 'second');
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining('Duplicate storage key detected')
+        );
+        expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining(key)
+        );
+
+        warnSpy.mockRestore();
+    });
 });
