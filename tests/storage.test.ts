@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     artifactWithStorage,
     readArtifact,
+    resetArtifact,
     writeArtifact,
 } from '../src/index';
 
@@ -152,6 +153,7 @@ describe('artifactWithStorage', () => {
         expect(readArtifact(ref)).toBe('new');
     });
 
+<<<<<<< HEAD
     it('warns when the same storage key is used twice', () => {
         const key = uniqueKey('duplicate');
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -169,5 +171,46 @@ describe('artifactWithStorage', () => {
         );
 
         warnSpy.mockRestore();
+    });
+
+    it('reset re-reads from storage instead of restoring create-time snapshot', () => {
+        const key = uniqueKey('theme');
+        localStorage.setItem(key, JSON.stringify('dark'));
+        const ref = artifactWithStorage(key, 'light');
+        expect(readArtifact(ref)).toBe('dark');
+
+        writeArtifact(ref, 'blue');
+        expect(readArtifact(ref)).toBe('blue');
+
+        localStorage.setItem(key, JSON.stringify('green'));
+        resetArtifact(ref);
+        expect(readArtifact(ref)).toBe('green');
+    });
+
+    it('reset does not overwrite newer storage with stale create-time value', () => {
+        const key = uniqueKey('counter');
+        localStorage.setItem(key, JSON.stringify(10));
+        const ref = artifactWithStorage(key, 0);
+        expect(readArtifact(ref)).toBe(10);
+
+        writeArtifact(ref, 20);
+        expect(readArtifact(ref)).toBe(20);
+        expect(localStorage.getItem(key)).toBe(JSON.stringify(20));
+
+        localStorage.setItem(key, JSON.stringify(99));
+        resetArtifact(ref);
+        expect(readArtifact(ref)).toBe(99);
+        expect(localStorage.getItem(key)).toBe(JSON.stringify(99));
+    });
+
+    it('reset picks up fallback when storage key is deleted externally', () => {
+        const key = uniqueKey('optional');
+        localStorage.setItem(key, JSON.stringify('exists'));
+        const ref = artifactWithStorage(key, 'fallback');
+        expect(readArtifact(ref)).toBe('exists');
+
+        localStorage.removeItem(key);
+        resetArtifact(ref);
+        expect(readArtifact(ref)).toBe('fallback');
     });
 });

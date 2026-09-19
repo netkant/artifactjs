@@ -620,7 +620,7 @@ export function artifactWithStorage<T = undefined>(
         }
     }
 
-    const base = artifact(readFromStorage());
+    const base = artifact(readFromStorage);
     const state = getOrCreateState(base);
 
     let syncing = false;
@@ -644,8 +644,9 @@ export function artifactWithStorage<T = undefined>(
 
                 syncing = true;
                 writeState(state, next);
-                syncing = false;
             } catch {
+                // Deserialization or write failure
+            } finally {
                 syncing = false;
             }
         });

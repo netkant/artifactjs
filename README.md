@@ -186,6 +186,8 @@ const tagsArtifact = artifactWithStorage('tags', new Set(), {
 
 The returned artifact works exactly like a regular artifact -- use it with `useArtifact`, `useArtifactValue`, `writeArtifact`, etc.
 
+**Reset behavior:** When you reset a storage artifact (via `resetArtifact` or `useResetArtifact`), it re-reads the current value from storage rather than restoring a create-time snapshot. This ensures reset always syncs with the latest storage state, even if the storage was modified externally (by another tab or process). If the storage key is missing, reset restores the fallback value.
+
 **Options:**
 
 | Option | Default | Description |
