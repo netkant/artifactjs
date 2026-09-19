@@ -3,6 +3,7 @@ import { Component, Suspense, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     artifact,
+    readArtifact,
     useArtifact,
     useArtifactValue,
     useResetArtifact,
@@ -196,6 +197,39 @@ describe('React hooks', () => {
 
         // Verify the reset succeeded (instance wasn't evicted)
         expect(screen.getByTestId('reset-value-1').textContent).toBe('1');
+    });
+
+    it('useSetArtifact pins instance even without value reader', () => {
+        const data = artifact(({ id }: { id: number }) => id, { maxEntries: 2 });
+
+        function SetterOnlyComponent() {
+            const setData1 = useSetArtifact(data({ id: 1 }));
+            return (
+                <button type="button" onClick={() => setData1(100)}>
+                    set-1
+                </button>
+            );
+        }
+
+        render(<SetterOnlyComponent />);
+
+        // Initialize the instance
+        writeArtifact(data({ id: 1 }), 1);
+
+        // Force eviction by creating maxEntries more instances
+        act(() => {
+            writeArtifact(data({ id: 2 }), 2);
+            writeArtifact(data({ id: 3 }), 3);
+        });
+
+        // Now write via the setter (which should have pinned id:1)
+        act(() => {
+            screen.getByRole('button', { name: 'set-1' }).click();
+        });
+
+        // Verify the write succeeded (instance wasn't evicted)
+        const value = readArtifact(data({ id: 1 }));
+        expect(value).toBe(100);
     });
 
     it('useResetArtifact restores the initial value', () => {

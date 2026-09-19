@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
+
+// Allow typeof process check without @types/node
+declare const process: { env: { NODE_ENV?: string } } | undefined;
 
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
@@ -715,10 +718,7 @@ export function artifactWithStorage<T = undefined>(
     const compositeKey = `${storageBackend === sessionStorage ? 'session' : 'local'}:${key}`;
 
     if (STORAGE_KEYS.has(compositeKey)) {
-        // Warn in development about duplicate storage keys
-        // @ts-expect-error - process is not available in browser, but fine to check
-        const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
-        if (isDev) {
+        if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
             console.warn(
                 `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
                 `Each key should be created only once per application. ` +
@@ -853,9 +853,10 @@ export function useSetArtifact<T>(candidate: Artifact<T>): (nextValueOrUpdater: 
     const state = getOrCreateState(artifactRef);
 
     // Pin the state in LRU to prevent eviction while this hook is mounted
-    useEffect(() => {
-        return subscribe(state, () => {});
-    }, [state]);
+    // Use useSyncExternalStore with no-op getSnapshot to subscribe without triggering re-renders
+    const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
+    const getSnapshot = useCallback(() => null, []);
+    useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 
     return useCallback(
         (nextValueOrUpdater: ArtifactUpdater<T>) => {
@@ -871,9 +872,10 @@ export function useResetArtifact<T>(candidate: Artifact<T>): () => void {
     const state = getOrCreateState(artifactRef);
 
     // Pin the state in LRU to prevent eviction while this hook is mounted
-    useEffect(() => {
-        return subscribe(state, () => {});
-    }, [state]);
+    // Use useSyncExternalStore with no-op getSnapshot to subscribe without triggering re-renders
+    const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
+    const getSnapshot = useCallback(() => null, []);
+    useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 
     return useCallback(() => {
         resetState(state, artifactRef);
