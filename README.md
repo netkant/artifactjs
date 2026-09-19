@@ -617,7 +617,9 @@ const b = artifact(({ get }) => get(a) + 1);
 readArtifact(a); // throws: "Circular dependency detected..."
 ```
 
-This prevents infinite loops and stack overflows. Ensure your derived artifacts form a directed acyclic graph (DAG). Note that cycle detection uses a process-global computation stack, so cycles are detected correctly in SSR environments where multiple requests share the same process.
+This prevents infinite loops and stack overflows. Ensure your derived artifacts form a directed acyclic graph (DAG).
+
+**SSR caveat:** Cycle detection uses a process-global computation stack. In concurrent SSR environments where multiple requests share the same process, this can lead to false cycle detection or stack pollution across requests (same concern as module-level state in SSR). Consider request isolation or per-request artifact instances if you encounter issues.
 
 ## Benchmarks
 

@@ -147,7 +147,7 @@ describe('circular dependency detection', () => {
         expect(() => readArtifact(factorial({ n: 5 }))).toThrow(/Circular dependency detected/);
     });
 
-    it('allows proper recursive pattern with base case', () => {
+    it('allows derived artifact reading from static artifact (non-cycle)', () => {
         const counter = artifact(5);
         
         const computed = artifact(({ get }) => {

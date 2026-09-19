@@ -7,6 +7,14 @@ const STORAGE_KEYS = new Set<string>();
 /** Global computation stack to detect circular dependencies during initialization. */
 const COMPUTATION_STACK = new Set<ArtifactState>();
 
+/** Custom error class for circular dependency detection. */
+class CircularDependencyError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'CircularDependencyError';
+    }
+}
+
 /** Cache freshness options for `artifact()`. */
 export interface ArtifactOptions {
     maxAge?: number;
@@ -205,12 +213,12 @@ function isExpired(state: ArtifactState, family: ArtifactFamily): boolean {
     return Date.now() - state.updatedAt > maxAge;
 }
 
-function createCircularDependencyError(state: ArtifactState): Error {
+function createCircularDependencyError(state: ArtifactState): CircularDependencyError {
     const { artifactRef } = state;
     const { key } = artifactRef;
     const displayKey = key === DEFAULT_KEY ? '(default)' : key;
     
-    return new Error(
+    return new CircularDependencyError(
         `Circular dependency detected: artifact with key ${displayKey} is part of a dependency cycle. ` +
         `Check your artifact initializers for cycles in the dependency graph.`
     );
@@ -390,7 +398,7 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
     // Check for circular dependency before entering computation
     if (COMPUTATION_STACK.has(state)) {
         // Only mark as rejected and notify if not already rejected with a circular dependency error
-        if (state.status !== 'rejected' || !(state.error instanceof Error && state.error.message.includes('Circular dependency detected'))) {
+        if (state.status !== 'rejected' || !(state.error instanceof CircularDependencyError)) {
             const error = createCircularDependencyError(state);
             state.generation++;
             state.status = 'rejected';
