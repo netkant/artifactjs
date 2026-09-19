@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
 
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
@@ -958,4 +958,124 @@ export function subscribeArtifact<T>(candidate: Artifact<T>, listener: Listener)
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
     return subscribe(state, listener);
+}
+
+/**
+ * Get the current status of an artifact.
+ * 
+ * Returns:
+ * - `'pending'` — initializer is running, value not yet available
+ * - `'resolved'` — value is available (may be stale during revalidation)
+ * - `'rejected'` — initializer threw an error
+ * 
+ * Use this to implement custom loading states, retry logic, or status-aware UIs.
+ * 
+ * @example
+ * ```ts
+ * const status = getArtifactStatus(usersArtifact);
+ * if (status === 'pending') {
+ *   return <Spinner />;
+ * }
+ * if (status === 'rejected') {
+ *   return <ErrorRetry onRetry={() => resetArtifact(usersArtifact)} />;
+ * }
+ * return <UserList users={readArtifact(usersArtifact)} />;
+ * ```
+ */
+export function getArtifactStatus<T>(candidate: Artifact<T>): 'pending' | 'resolved' | 'rejected' {
+    const artifactRef = ensureArtifactRef(candidate);
+    const state = getOrCreateState(artifactRef);
+    return state.status;
+}
+
+/** Loadable state returned by `useArtifactLoadable`. */
+export type ArtifactLoadable<T> =
+    | { status: 'pending'; value: undefined; error: undefined }
+    | { status: 'resolved'; value: T; error: undefined }
+    | { status: 'rejected'; value: undefined; error: unknown };
+
+/**
+ * Read an artifact's status, value, and error without suspending or throwing.
+ * 
+ * Unlike `useArtifactValue` (which suspends on pending and throws on error),
+ * this hook returns a loadable object that lets you handle all states explicitly
+ * in your component.
+ * 
+ * Use this for custom loading states, inline error messages, or retry UIs without
+ * needing Suspense or Error Boundaries.
+ * 
+ * @example
+ * ```tsx
+ * function UserProfile({ userId }) {
+ *   const loadable = useArtifactLoadable(userArtifact({ id: userId }));
+ *   const reset = useResetArtifact(userArtifact({ id: userId }));
+ * 
+ *   if (loadable.status === 'pending') {
+ *     return <Spinner />;
+ *   }
+ * 
+ *   if (loadable.status === 'rejected') {
+ *     return (
+ *       <div>
+ *         <p>Error: {loadable.error.message}</p>
+ *         <button onClick={reset}>Retry</button>
+ *       </div>
+ *     );
+ *   }
+ * 
+ *   return <div>Hello, {loadable.value.name}!</div>;
+ * }
+ * ```
+ */
+export function useArtifactLoadable<T>(candidate: Artifact<T>): ArtifactLoadable<T> {
+    const artifactRef = ensureArtifactRef(candidate);
+    const state = getOrCreateState(artifactRef);
+
+    // Cache the last loadable to return stable references
+    const cacheRef = useRef<{
+        generation: number;
+        status: string;
+        value: unknown;
+        error: unknown;
+        loadable: ArtifactLoadable<T>;
+    } | null>(null);
+
+    const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
+    
+    const getSnapshot = useCallback(() => {
+        // Check if we can reuse the cached loadable
+        const cache = cacheRef.current;
+        if (
+            cache &&
+            cache.generation === state.generation &&
+            cache.status === state.status &&
+            Object.is(cache.value, state.value) &&
+            Object.is(cache.error, state.error)
+        ) {
+            return cache.loadable;
+        }
+
+        // Create new loadable
+        let loadable: ArtifactLoadable<T>;
+        if (state.status === 'pending') {
+            loadable = { status: 'pending', value: undefined, error: undefined };
+        } else if (state.status === 'rejected') {
+            loadable = { status: 'rejected', value: undefined, error: state.error };
+        } else {
+            loadable = { status: 'resolved', value: state.value as T, error: undefined };
+        }
+
+        // Cache it
+        cacheRef.current = {
+            generation: state.generation,
+            status: state.status,
+            value: state.value,
+            error: state.error,
+            loadable,
+        };
+
+        return loadable;
+    }, [state]);
+
+    return useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 }
