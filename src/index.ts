@@ -225,17 +225,30 @@ function fastFlatObjectKey(obj: Record<string, string | number | boolean | null 
     
     for (const key of keys) {
         const val = obj[key];
-        let valStr: string;
+        let taggedVal: string;
         
+        // Use same primitive tagging as fastPrimitiveKey for type safety
         if (val === null) {
-            valStr = 'null';
+            taggedVal = 'n:null';
         } else if (val === undefined) {
-            valStr = 'undefined';
+            taggedVal = 'u:undefined';
         } else {
-            valStr = String(val);
+            const t = typeof val;
+            if (t === 'string') {
+                taggedVal = `s:${val}`;
+            } else if (t === 'number') {
+                taggedVal = `n:${val}`;
+            } else if (t === 'boolean') {
+                taggedVal = `b:${val}`;
+            } else if (t === 'bigint') {
+                taggedVal = `i:${val}`;
+            } else {
+                taggedVal = `?:${String(val)}`;
+            }
         }
         
-        pairs.push(`${key}:${valStr}`);
+        // JSON.stringify key to escape : and , delimiters
+        pairs.push(`${JSON.stringify(key)}:${taggedVal}`);
     }
     
     return `f:${pairs.join(',')}`;

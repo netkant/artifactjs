@@ -257,6 +257,66 @@ describe('tiered cache keys', () => {
             expect(init).toHaveBeenCalledTimes(2);
         });
 
+        it('does not collide flat object {a:1} with {a:"1"}', async () => {
+            const init = vi.fn(async (params: any) => params);
+            const data = artifact(init);
+
+            await waitForValue(data({ a: 1 }));
+            await waitForValue(data({ a: '1' }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not collide flat object {a:null} with {a:"null"}', async () => {
+            const init = vi.fn(async (params: any) => params);
+            const data = artifact(init);
+
+            await waitForValue(data({ a: null }));
+            await waitForValue(data({ a: 'null' }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not collide flat object {a:true} with {a:"true"}', async () => {
+            const init = vi.fn(async (params: any) => params);
+            const data = artifact(init);
+
+            await waitForValue(data({ a: true }));
+            await waitForValue(data({ a: 'true' }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not collide flat object {a:undefined} with {a:"undefined"}', async () => {
+            const init = vi.fn(async (params: any) => params);
+            const data = artifact(init);
+
+            await waitForValue(data({ a: undefined }));
+            await waitForValue(data({ a: 'undefined' }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not collide flat object {a:"1,b:2"} with {a:"1",b:"2"}', async () => {
+            const init = vi.fn(async (params: any) => params);
+            const data = artifact(init);
+
+            await waitForValue(data({ a: '1,b:2' }));
+            await waitForValue(data({ a: '1', b: '2' }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
+        it('does not collide flat object {"a:b":"c"} with {a:"b:c"}', async () => {
+            const init = vi.fn(async (params: any) => params);
+            const data = artifact(init);
+
+            await waitForValue(data({ 'a:b': 'c' }));
+            await waitForValue(data({ a: 'b:c' }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
         it('does not collide flat object with nested object', async () => {
             const init = vi.fn(async (params: any) => params);
             const data = artifact(init);
