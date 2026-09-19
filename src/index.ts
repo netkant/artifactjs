@@ -8,7 +8,10 @@ const STORAGE_KEYS = new Set<string>();
 export interface ArtifactOptions {
     maxAge?: number;
     revalidate?: 'on-read' | 'auto';
-
+    /** Stable cache key for parameterized instances. Default: deterministic JSON.stringify with sorted object keys. */
+    key?: (params: any) => string;
+    /** Soft LRU cap on parameterized instances. Default: Infinity (unlimited). Opt-in to a finite limit by setting a number. Set to false to explicitly disable. Evicts only unsubscribed, non-pending instances. */
+    maxEntries?: number | false;
 }
 
 /** Options for `artifactWithStorage()`. */
@@ -27,6 +30,8 @@ export type ArtifactInitializerArg<P extends object = object> = { get: ArtifactG
 type ResolvedOptions = {
     maxAge: number;
     revalidate: 'on-read' | 'auto';
+    key?: (params: any) => string;
+    maxEntries: number;
 };
 
 type Listener = () => void;
@@ -35,6 +40,7 @@ type ArtifactFamily = {
     initializer: unknown;
     options: ResolvedOptions;
     instances: Map<string, ArtifactState>;
+    lruOrder: string[];
 };
 
 /**
@@ -72,14 +78,19 @@ type ArtifactState = {
 };
 
 function createFamily(initializer: unknown, options: ArtifactOptions = {}): ArtifactFamily {
+    // Ensure maxEntries is a number (convert false to Infinity if needed)
+    const maxEntries: number = options.maxEntries === false ? Infinity : (options.maxEntries ?? Infinity);
+    
     return {
         initializer,
         options: {
-            maxAge: Infinity,
-            revalidate: 'on-read',
-            ...options,
+            maxAge: options.maxAge ?? Infinity,
+            revalidate: options.revalidate ?? 'on-read',
+            key: options.key,
+            maxEntries,
         },
         instances: new Map(),
+        lruOrder: [],
     };
 }
 
@@ -92,22 +103,71 @@ function isArtifactRef(value: unknown): value is Artifact {
     );
 }
 
+function stableStringify(value: unknown): string {
+    if (value === null) return 'null';
+    if (value === undefined) return 'undefined';
+    if (typeof value === 'string') return JSON.stringify(value);
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    
+    // Handle special built-in types
+    if (value instanceof Date) {
+        return `Date:${value.toISOString()}`;
+    }
+    if (value instanceof RegExp) {
+        return `RegExp:${value.toString()}`;
+    }
+    if (value instanceof Map) {
+        const entries = Array.from(value.entries())
+            .map(([k, v]) => [stableStringify(k), stableStringify(v)])
+            .sort((a, b) => a[0].localeCompare(b[0]));
+        return `Map:[${entries.map(([k, v]) => `[${k},${v}]`).join(',')}]`;
+    }
+    if (value instanceof Set) {
+        const items = Array.from(value)
+            .map(stableStringify)
+            .sort();
+        return `Set:[${items.join(',')}]`;
+    }
+    
+    if (Array.isArray(value)) {
+        return '[' + value.map(stableStringify).join(',') + ']';
+    }
+    
+    if (typeof value === 'object') {
+        const keys = Object.keys(value).sort();
+        const pairs = keys.map(key => JSON.stringify(key) + ':' + stableStringify((value as Record<string, unknown>)[key]));
+        return '{' + pairs.join(',') + '}';
+    }
+    
+    return String(value);
+}
+
 function createArtifactRef(family: ArtifactFamily, args: unknown[] = []): Artifact {
     return {
         [ARTIFACT_REF]: true,
         family,
         args,
-        key: createCacheKey(args),
+        key: createCacheKey(family, args),
     };
 }
 
-function createCacheKey(args: unknown[]): string {
+function createCacheKey(family: ArtifactFamily, args: unknown[]): string {
     if (args.length === 0) {
         return DEFAULT_KEY;
     }
 
+    const { key: customKey } = family.options;
+    
+    if (customKey) {
+        const params = args[0];
+        if (!isPlainObject(params)) {
+            throw new Error('Custom key function requires params to be a plain object');
+        }
+        return customKey(params as object);
+    }
+
     try {
-        return JSON.stringify(args);
+        return stableStringify(args);
     } catch {
         return args.map((arg) => String(arg)).join('|');
     }
@@ -139,6 +199,57 @@ function isExpired(state: ArtifactState, family: ArtifactFamily): boolean {
     }
 
     return Date.now() - state.updatedAt > maxAge;
+}
+
+function updateLRU(family: ArtifactFamily, key: string): void {
+    const { lruOrder } = family;
+    const index = lruOrder.indexOf(key);
+    
+    if (index !== -1) {
+        lruOrder.splice(index, 1);
+    }
+    
+    lruOrder.push(key);
+}
+
+function evictLRU(family: ArtifactFamily): void {
+    const { maxEntries } = family.options;
+    const { instances, lruOrder } = family;
+    
+    if (!Number.isFinite(maxEntries)) {
+        return;
+    }
+    
+    // Need to evict before we exceed the limit
+    while (instances.size >= maxEntries) {
+        let evicted = false;
+        
+        for (const key of lruOrder) {
+            const state = instances.get(key);
+            
+            // Skip instances with subscribers or pending async operations
+            if (!state || state.listeners.size > 0 || state.status === 'pending') {
+                continue;
+            }
+            
+            clearRevalidateTimer(state);
+            teardownDeps(state);
+            instances.delete(key);
+            
+            const lruIndex = lruOrder.indexOf(key);
+            if (lruIndex !== -1) {
+                lruOrder.splice(lruIndex, 1);
+            }
+            
+            evicted = true;
+            break;
+        }
+        
+        // If we couldn't evict anything (all instances subscribed or pending), stop trying
+        if (!evicted) {
+            break;
+        }
+    }
 }
 
 function clearRevalidateTimer(state: ArtifactState): void {
@@ -194,12 +305,16 @@ function getOrCreateState(artifactRef: Artifact): ArtifactState {
     const cached = artifactRef.family.instances.get(artifactRef.key);
 
     if (cached) {
+        updateLRU(artifactRef.family, artifactRef.key);
+        
         if (isExpired(cached, artifactRef.family)) {
             revalidateState(cached, artifactRef);
         }
 
         return cached;
     }
+
+    evictLRU(artifactRef.family);
 
     const state: ArtifactState = {
         artifactRef,
@@ -217,6 +332,7 @@ function getOrCreateState(artifactRef: Artifact): ArtifactState {
     };
 
     artifactRef.family.instances.set(artifactRef.key, state);
+    updateLRU(artifactRef.family, artifactRef.key);
 
     hydrateStateFromInitializer(state, artifactRef);
 
@@ -507,6 +623,7 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
 
 function subscribe(state: ArtifactState, listener: Listener): () => void {
     state.listeners.add(listener);
+    updateLRU(state.artifactRef.family, state.artifactRef.key);
 
     if (isExpired(state, state.artifactRef.family)) {
         revalidateState(state, state.artifactRef);
@@ -544,6 +661,8 @@ function notify(state: ArtifactState): void {
 }
 
 function writeState<T>(state: ArtifactState, nextValueOrUpdater: ArtifactUpdater<T>): void {
+    updateLRU(state.artifactRef.family, state.artifactRef.key);
+    
     const currentValue = state.status === 'resolved' ? (state.value as T) : undefined;
     const nextValue =
         typeof nextValueOrUpdater === 'function'
@@ -596,7 +715,8 @@ export function artifactWithStorage<T = undefined>(
     const compositeKey = `${storageBackend === sessionStorage ? 'session' : 'local'}:${key}`;
 
     if (STORAGE_KEYS.has(compositeKey)) {
-        if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        const proc = (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process;
+        if (proc && proc.env?.NODE_ENV !== 'production') {
             console.warn(
                 `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
                 `Each key should be created only once per application. ` +
@@ -670,7 +790,28 @@ export function artifact<T>(promise: Promise<T>, options?: ArtifactOptions): Art
 /** Create an artifact from a static value. */
 export function artifact<T>(value: T, options?: ArtifactOptions): Artifact<T>;
 export function artifact(initializer: unknown, options: ArtifactOptions = {}): Artifact | ArtifactFactory<unknown> {
-    const family = createFamily(initializer, options);
+    // Default maxEntries to Infinity (unlimited) for all artifacts
+    // Users can opt-in to a finite limit with maxEntries: <number>
+    const defaultMaxEntries = Infinity;
+    // Treat false as Infinity (disable eviction)
+    // Treat invalid values (<= 0, NaN) as Infinity (disable eviction)
+    let maxEntries: number;
+    if (options.maxEntries === false) {
+        maxEntries = Infinity;
+    } else if (typeof options.maxEntries === 'number') {
+        maxEntries = options.maxEntries <= 0 || !Number.isFinite(options.maxEntries) ? Infinity : options.maxEntries;
+    } else {
+        maxEntries = defaultMaxEntries;
+    }
+    
+    const resolvedOptions = {
+        maxAge: options.maxAge,
+        revalidate: options.revalidate,
+        key: options.key,
+        maxEntries,
+    };
+    
+    const family = createFamily(initializer, resolvedOptions);
 
     if (typeof initializer === 'function') {
         const factory = (...args: unknown[]) => createArtifactRef(family, args);
@@ -709,6 +850,12 @@ export function useSetArtifact<T>(candidate: Artifact<T>): (nextValueOrUpdater: 
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
 
+    // Pin the state in LRU to prevent eviction while this hook is mounted
+    // Use useSyncExternalStore with no-op getSnapshot to subscribe without triggering re-renders
+    const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
+    const getSnapshot = useCallback(() => null, []);
+    useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
+
     return useCallback(
         (nextValueOrUpdater: ArtifactUpdater<T>) => {
             writeState(state, nextValueOrUpdater);
@@ -721,6 +868,12 @@ export function useSetArtifact<T>(candidate: Artifact<T>): (nextValueOrUpdater: 
 export function useResetArtifact<T>(candidate: Artifact<T>): () => void {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
+
+    // Pin the state in LRU to prevent eviction while this hook is mounted
+    // Use useSyncExternalStore with no-op getSnapshot to subscribe without triggering re-renders
+    const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
+    const getSnapshot = useCallback(() => null, []);
+    useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 
     return useCallback(() => {
         resetState(state, artifactRef);

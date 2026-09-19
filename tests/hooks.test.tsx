@@ -3,6 +3,7 @@ import { Component, Suspense, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     artifact,
+    readArtifact,
     useArtifact,
     useArtifactValue,
     useResetArtifact,
@@ -107,6 +108,128 @@ describe('React hooks', () => {
 
         expect(screen.getByTestId('setter-value').textContent).toBe('1');
         expect(setterRenders).toBe(1);
+    });
+
+    it('useSetArtifact pins the instance to prevent LRU eviction', () => {
+        const data = artifact(({ id }: { id: number }) => id, { maxEntries: 2 });
+
+        function SetterComponent() {
+            const setData1 = useSetArtifact(data({ id: 1 }));
+            return (
+                <button type="button" onClick={() => setData1(100)}>
+                    set-1
+                </button>
+            );
+        }
+
+        function Reader({ id }: { id: number }) {
+            const value = useArtifactValue(data({ id }));
+            return <span data-testid={`value-${id}`}>{value}</span>;
+        }
+
+        render(
+            <>
+                <SetterComponent />
+                <Reader id={1} />
+            </>,
+        );
+
+        expect(screen.getByTestId('value-1').textContent).toBe('1');
+
+        // Force eviction by creating maxEntries more instances
+        act(() => {
+            writeArtifact(data({ id: 2 }), 2);
+            writeArtifact(data({ id: 3 }), 3);
+        });
+
+        // Now write via the setter (which should have pinned id:1)
+        act(() => {
+            screen.getByRole('button', { name: 'set-1' }).click();
+        });
+
+        // Verify the write succeeded (instance wasn't evicted)
+        expect(screen.getByTestId('value-1').textContent).toBe('100');
+    });
+
+    it('useResetArtifact pins the instance to prevent LRU eviction', () => {
+        const data = artifact(({ id }: { id: number }) => id, { maxEntries: 2 });
+
+        function ResetComponent() {
+            const resetData1 = useResetArtifact(data({ id: 1 }));
+            return (
+                <button type="button" onClick={() => resetData1()}>
+                    reset-1
+                </button>
+            );
+        }
+
+        function Reader({ id }: { id: number }) {
+            const value = useArtifactValue(data({ id }));
+            return <span data-testid={`reset-value-${id}`}>{value}</span>;
+        }
+
+        render(
+            <>
+                <ResetComponent />
+                <Reader id={1} />
+            </>,
+        );
+
+        expect(screen.getByTestId('reset-value-1').textContent).toBe('1');
+
+        // Modify the value
+        act(() => {
+            writeArtifact(data({ id: 1 }), 100);
+        });
+
+        expect(screen.getByTestId('reset-value-1').textContent).toBe('100');
+
+        // Force eviction by creating maxEntries more instances
+        act(() => {
+            writeArtifact(data({ id: 2 }), 2);
+            writeArtifact(data({ id: 3 }), 3);
+        });
+
+        // Now reset via the hook (which should have pinned id:1)
+        act(() => {
+            screen.getByRole('button', { name: 'reset-1' }).click();
+        });
+
+        // Verify the reset succeeded (instance wasn't evicted)
+        expect(screen.getByTestId('reset-value-1').textContent).toBe('1');
+    });
+
+    it('useSetArtifact pins instance even without value reader', () => {
+        const data = artifact(({ id }: { id: number }) => id, { maxEntries: 2 });
+
+        function SetterOnlyComponent() {
+            const setData1 = useSetArtifact(data({ id: 1 }));
+            return (
+                <button type="button" onClick={() => setData1(100)}>
+                    set-1
+                </button>
+            );
+        }
+
+        render(<SetterOnlyComponent />);
+
+        // Initialize the instance
+        writeArtifact(data({ id: 1 }), 1);
+
+        // Force eviction by creating maxEntries more instances
+        act(() => {
+            writeArtifact(data({ id: 2 }), 2);
+            writeArtifact(data({ id: 3 }), 3);
+        });
+
+        // Now write via the setter (which should have pinned id:1)
+        act(() => {
+            screen.getByRole('button', { name: 'set-1' }).click();
+        });
+
+        // Verify the write succeeded (instance wasn't evicted)
+        const value = readArtifact(data({ id: 1 }));
+        expect(value).toBe(100);
     });
 
     it('useResetArtifact restores the initial value', () => {

@@ -106,6 +106,56 @@ function UserProfile({ userId }) {
 
 Each unique set of parameters gets its own cached value -- `userArtifact({ id: 1 })` and `userArtifact({ id: 2 })` are independent.
 
+#### Cache key and LRU eviction
+
+By default, parameterized instances are cached by a stable JSON representation with sorted object keys -- `{ b: 2, a: 1 }` and `{ a: 1, b: 2 }` share the same instance. **By default, there is no limit** on the number of cached instances. You can opt-in to automatic memory management with the `key` and `maxEntries` options:
+
+```jsx
+const userArtifact = artifact(
+    ({ id }) => fetch(`/api/users/${id}`).then((res) => res.json()),
+    {
+        key: ({ id }) => `user:${id}`,
+        maxEntries: 500,  // Opt-in to LRU eviction with a finite limit
+    },
+);
+```
+
+**Options:**
+
+| Option | Default | Description |
+|---|---|---|
+| `key` | Stable `JSON.stringify` with sorted keys | Function that takes params and returns a cache key string |
+| `maxEntries` | `Infinity` (unlimited) | Soft LRU cap on parameterized instances. Set to a number to enable automatic eviction. When exceeded, evicts least-recently-used instances that have no active subscribers and are not pending |
+
+**Eviction behavior:**
+
+When `maxEntries` is set to a finite number and the limit is reached, Artifact evicts the least-recently-used instance **only if it has no subscribers and is not pending**. Instances are touched (moved to the end of the LRU queue) on every read, write, or subscribe. If all instances have active subscribers or are pending async operations when the limit is reached, no eviction occurs and the cache can temporarily grow beyond `maxEntries`.
+
+Invalid `maxEntries` values (<= 0, NaN) are treated as `Infinity` (unlimited). Setting `maxEntries: false` is an alias for `Infinity`.
+
+**Opt-in example:**
+
+For applications that create many parameterized instances, set `maxEntries` to enable automatic memory management:
+
+```jsx
+// Limit to 500 cached user instances
+const userArtifact = artifact(
+    ({ id }) => fetch(`/api/users/${id}`).then((res) => res.json()),
+    { maxEntries: 500 },
+);
+
+// Limit with custom key
+const postArtifact = artifact(
+    ({ id }) => fetch(`/api/posts/${id}`).then((res) => res.json()),
+    { 
+        key: ({ id }) => `post:${id}`,
+        maxEntries: 200 
+    },
+);
+```
+
+Non-parameterized (static or promise) artifacts are unaffected by `maxEntries` and never auto-evict.
+
 ### Derived artifacts
 
 An artifact can read from other artifacts using the `get` function. When a dependency changes, the derived artifact recomputes automatically:
