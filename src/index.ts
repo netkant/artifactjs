@@ -634,7 +634,8 @@ export function artifactWithStorage<T = undefined>(
         }
     }
 
-    const base = artifact(() => readFromStorage());
+    const factory = artifact(() => readFromStorage());
+    const base = createArtifactRef(factory.family) as Artifact<T>;
     const state = getOrCreateState(base);
 
     let syncing = false;

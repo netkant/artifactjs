@@ -23,6 +23,13 @@ afterEach(() => {
 });
 
 describe('artifactWithStorage', () => {
+    it('returns a plain artifact object, not a callable factory', () => {
+        const key = uniqueKey('ref-type');
+        const ref = artifactWithStorage(key, 'value');
+        expect(typeof ref).toBe('object');
+        expect(typeof ref).not.toBe('function');
+    });
+
     it('uses the fallback when the key is missing', () => {
         const key = uniqueKey('theme');
         const ref = artifactWithStorage(key, 'light');
