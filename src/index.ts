@@ -577,6 +577,18 @@ export function artifactWithStorage<T = undefined>(
     initialValue?: T,
     options: ArtifactStorageOptions<T> = {},
 ): Artifact<T> {
+    if (STORAGE_KEYS.has(key)) {
+        if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+            console.warn(
+                `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
+                `Each key should be created only once per application. ` +
+                `Same-tab instances with the same key do not sync via the storage event. ` +
+                `For more information, see the README.`
+            );
+        }
+    }
+    STORAGE_KEYS.add(key);
+
     const fallback = initialValue as T;
     const {
         storage: getStorage = () => localStorage,
