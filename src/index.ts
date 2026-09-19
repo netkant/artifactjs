@@ -4,6 +4,17 @@ const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
 const STORAGE_KEYS = new Set<string>();
 
+/** Global computation stack to detect circular dependencies during initialization. */
+const COMPUTATION_STACK = new Set<ArtifactState>();
+
+/** Custom error class for circular dependency detection. */
+class CircularDependencyError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'CircularDependencyError';
+    }
+}
+
 /** Cache freshness options for `artifact()`. */
 export interface ArtifactOptions {
     maxAge?: number;
@@ -202,6 +213,17 @@ function isExpired(state: ArtifactState, family: ArtifactFamily): boolean {
     return Date.now() - state.updatedAt > maxAge;
 }
 
+function createCircularDependencyError(state: ArtifactState): CircularDependencyError {
+    const { artifactRef } = state;
+    const { key } = artifactRef;
+    const displayKey = key === DEFAULT_KEY ? '(default)' : key;
+    
+    return new CircularDependencyError(
+        `Circular dependency detected: artifact with key ${displayKey} is part of a dependency cycle. ` +
+        `Check your artifact initializers for cycles in the dependency graph.`
+    );
+}
+
 function updateLRU(family: ArtifactFamily, key: string): void {
     const { lruOrder } = family;
     const index = lruOrder.indexOf(key);
@@ -373,52 +395,79 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
         return;
     }
 
-    const { result, depStates, pendingDeps, error } = runInitializer(
-        initializer as (arg: ArtifactInitializerArg) => unknown,
-        artifactRef,
-        state,
-    );
-
-    if (pendingDeps.length > 0) {
-        const prevStatus = state.status;
-        const prevValue = state.value;
-        teardownDeps(state);
-        hydrateStateFromInitializer(state, artifactRef);
-        if (state.status !== prevStatus || !Object.is(state.value, prevValue)) {
+    // Check for circular dependency before entering computation
+    if (COMPUTATION_STACK.has(state)) {
+        // Only mark as rejected and notify if not already rejected with a circular dependency error
+        if (state.status !== 'rejected' || !(state.error instanceof CircularDependencyError)) {
+            const error = createCircularDependencyError(state);
+            state.generation++;
+            state.status = 'rejected';
+            state.error = error;
+            state.promise = undefined;
+            // Build new loadable for rejected state
+            state.cachedLoadable = { status: 'rejected', value: undefined, error };
+            // Notify subscribers of the rejection once when transitioning to rejected
             notify(state);
         }
         return;
     }
 
-    const depsChanged = !sameDepSet(state.dependencies, depStates);
+    // Add to computation stack
+    COMPUTATION_STACK.add(state);
+    
+    try {
+        const { result, depStates, pendingDeps, error } = runInitializer(
+            initializer as (arg: ArtifactInitializerArg) => unknown,
+            artifactRef,
+            state,
+        );
 
-    if (depsChanged) {
-        teardownDeps(state);
-    }
+        if (pendingDeps.length > 0) {
+            const prevStatus = state.status;
+            const prevValue = state.value;
+            teardownDeps(state);
+            // Remove from stack before delegating to hydrateStateFromInitializer
+            COMPUTATION_STACK.delete(state);
+            hydrateStateFromInitializer(state, artifactRef);
+            if (state.status !== prevStatus || !Object.is(state.value, prevValue)) {
+                notify(state);
+            }
+            return;
+        }
 
-    if (error) {
-        const statusChanged = state.status !== 'rejected' || state.error !== error;
-        state.generation++;
-        state.status = 'rejected';
-        state.error = error;
-        state.promise = undefined;
-        // Build new loadable for rejected state
-        state.cachedLoadable = { status: 'rejected', value: undefined, error };
+        const depsChanged = !sameDepSet(state.dependencies, depStates);
+
+        if (depsChanged) {
+            teardownDeps(state);
+        }
+
+        if (error) {
+            const statusChanged = state.status !== 'rejected' || state.error !== error;
+            state.generation++;
+            state.status = 'rejected';
+            state.error = error;
+            state.promise = undefined;
+            // Build new loadable for rejected state
+            state.cachedLoadable = { status: 'rejected', value: undefined, error };
+            if (depsChanged) {
+                wireDepSubscriptions(state, artifactRef, depStates);
+            }
+            if (statusChanged || depsChanged) {
+                notify(state);
+            }
+            return;
+        }
+
+        const changed = applyValue(state, result);
         if (depsChanged) {
             wireDepSubscriptions(state, artifactRef, depStates);
         }
-        if (statusChanged || depsChanged) {
+        if (changed) {
             notify(state);
         }
-        return;
-    }
-
-    const changed = applyValue(state, result);
-    if (depsChanged) {
-        wireDepSubscriptions(state, artifactRef, depStates);
-    }
-    if (changed) {
-        notify(state);
+    } finally {
+        // Always remove from computation stack
+        COMPUTATION_STACK.delete(state);
     }
 }
 
@@ -455,6 +504,11 @@ function runInitializer(
         const depRef = ensureArtifactRef(candidate);
         const depState = getOrCreateState(depRef);
         depStates.add(depState);
+
+        // Check for circular dependency
+        if (COMPUTATION_STACK.has(depState)) {
+            throw createCircularDependencyError(depState);
+        }
 
         if (depState.status === 'pending') {
             pendingDeps.push(depState.promise!);
@@ -510,65 +564,73 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
 
     teardownDeps(state);
 
-    const { result, depStates, pendingDeps, error } = runInitializer(
-        initializer as (arg: ArtifactInitializerArg) => unknown,
-        artifactRef,
-        state,
-    );
-
-    if (pendingDeps.length > 0) {
-        state.status = 'pending';
-        state.error = undefined;
-        state.generation++;
-        // Build new loadable for pending state
-        state.cachedLoadable = { status: 'pending', value: undefined, error: undefined };
-        const expectedGeneration = state.generation;
-        state.promise = Promise.all(pendingDeps).then(
-            () => {
-                if (state.generation !== expectedGeneration) {
-                    if (state.status === 'pending') return state.promise;
-                    if (state.status === 'rejected') throw state.error;
-                    return state.value;
-                }
-                hydrateStateFromInitializer(state, artifactRef);
-                notify(state);
-                if (state.status === 'pending') return state.promise;
-                if (state.status === 'rejected') throw state.error;
-                return state.value;
-            },
-            (error: unknown) => {
-                if (state.generation !== expectedGeneration) {
-                    if (state.status === 'pending') return state.promise;
-                    if (state.status === 'rejected') throw state.error;
-                    return state.value;
-                }
-                state.status = 'rejected';
-                state.error = error;
-                state.promise = undefined;
-                // Build new loadable for rejected state
-                state.cachedLoadable = { status: 'rejected', value: undefined, error };
-                notify(state);
-                throw error;
-            },
+    // Add to computation stack
+    COMPUTATION_STACK.add(state);
+    
+    try {
+        const { result, depStates, pendingDeps, error } = runInitializer(
+            initializer as (arg: ArtifactInitializerArg) => unknown,
+            artifactRef,
+            state,
         );
-        // Avoid unhandled rejection when only imperative readers are attached
-        state.promise.catch(() => {});
-        return;
-    }
 
-    if (error) {
-        state.generation++;
-        state.status = 'rejected';
-        state.error = error;
-        state.promise = undefined;
-        // Build new loadable for rejected state
-        state.cachedLoadable = { status: 'rejected', value: undefined, error };
+        if (pendingDeps.length > 0) {
+            state.status = 'pending';
+            state.error = undefined;
+            state.generation++;
+            // Build new loadable for pending state
+            state.cachedLoadable = { status: 'pending', value: undefined, error: undefined };
+            const expectedGeneration = state.generation;
+            state.promise = Promise.all(pendingDeps).then(
+                () => {
+                    if (state.generation !== expectedGeneration) {
+                        if (state.status === 'pending') return state.promise;
+                        if (state.status === 'rejected') throw state.error;
+                        return state.value;
+                    }
+                    hydrateStateFromInitializer(state, artifactRef);
+                    notify(state);
+                    if (state.status === 'pending') return state.promise;
+                    if (state.status === 'rejected') throw state.error;
+                    return state.value;
+                },
+                (error: unknown) => {
+                    if (state.generation !== expectedGeneration) {
+                        if (state.status === 'pending') return state.promise;
+                        if (state.status === 'rejected') throw state.error;
+                        return state.value;
+                    }
+                    state.status = 'rejected';
+                    state.error = error;
+                    state.promise = undefined;
+                    // Build new loadable for rejected state
+                    state.cachedLoadable = { status: 'rejected', value: undefined, error };
+                    notify(state);
+                    throw error;
+                },
+            );
+            // Avoid unhandled rejection when only imperative readers are attached
+            state.promise.catch(() => {});
+            return;
+        }
+
+        if (error) {
+            state.generation++;
+            state.status = 'rejected';
+            state.error = error;
+            state.promise = undefined;
+            // Build new loadable for rejected state
+            state.cachedLoadable = { status: 'rejected', value: undefined, error };
+            wireDepSubscriptions(state, artifactRef, depStates);
+            return;
+        }
+
+        applyValue(state, result);
         wireDepSubscriptions(state, artifactRef, depStates);
-        return;
+    } finally {
+        // Always remove from computation stack
+        COMPUTATION_STACK.delete(state);
     }
-
-    applyValue(state, result);
-    wireDepSubscriptions(state, artifactRef, depStates);
 }
 
 function markResolved(state: ArtifactState, value: unknown): void {

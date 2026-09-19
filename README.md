@@ -606,6 +606,21 @@ function App() {
 
 When the user clicks "Retry", `resetUsers()` re-fetches the data and `resetErrorBoundary()` clears the error state, allowing the component to re-render.
 
+### Circular dependencies
+
+Artifact detects circular dependencies in derived artifacts automatically. If artifact A depends on B, and B depends on A (directly or through a chain of dependencies), a clear error is thrown:
+
+```jsx
+const a = artifact(({ get }) => get(b) + 1);
+const b = artifact(({ get }) => get(a) + 1);
+
+readArtifact(a); // throws: "Circular dependency detected..."
+```
+
+This prevents infinite loops and stack overflows. Ensure your derived artifacts form a directed acyclic graph (DAG).
+
+**SSR caveat:** Cycle detection uses a process-global computation stack. In concurrent SSR environments where multiple requests share the same process, this can lead to false cycle detection or stack pollution across requests (same concern as module-level state in SSR). Consider request isolation or per-request artifact instances if you encounter issues.
+
 ## Benchmarks
 
 Compare Artifact against Jotai locally. The scenarios match the in-app benchmark (micro: vanilla store ops; React: hook updates with `requestAnimationFrame` timing, `memo` subscribers):
