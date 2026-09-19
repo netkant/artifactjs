@@ -153,7 +153,6 @@ describe('artifactWithStorage', () => {
         expect(readArtifact(ref)).toBe('new');
     });
 
-<<<<<<< HEAD
     it('warns when the same storage key is used twice', () => {
         const key = uniqueKey('duplicate');
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -212,5 +211,36 @@ describe('artifactWithStorage', () => {
         localStorage.removeItem(key);
         resetArtifact(ref);
         expect(readArtifact(ref)).toBe('fallback');
+    });
+
+    it('resumes persistence after a storage event throws during deserialization', () => {
+        const key = uniqueKey('event-throw');
+        let deserializeCallCount = 0;
+
+        localStorage.setItem(key, JSON.stringify('initial'));
+
+        const ref = artifactWithStorage(key, 'fallback', {
+            deserialize: (v: string) => {
+                deserializeCallCount++;
+                if (deserializeCallCount === 2) {
+                    throw new Error('deserialize error');
+                }
+                return JSON.parse(v) as string;
+            },
+        });
+
+        expect(readArtifact(ref)).toBe('initial');
+
+        window.dispatchEvent(
+            new StorageEvent('storage', {
+                key,
+                newValue: JSON.stringify('from-event'),
+                storageArea: localStorage,
+            }),
+        );
+
+        writeArtifact(ref, 'after-error');
+        expect(localStorage.getItem(key)).toBe(JSON.stringify('after-error'));
+        expect(readArtifact(ref)).toBe('after-error');
     });
 });
