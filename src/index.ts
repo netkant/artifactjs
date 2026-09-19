@@ -402,6 +402,8 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
         state.status = 'rejected';
         state.error = error;
         state.promise = undefined;
+        // Build new loadable for rejected state
+        state.cachedLoadable = { status: 'rejected', value: undefined, error };
         if (depsChanged) {
             wireDepSubscriptions(state, artifactRef, depStates);
         }
@@ -518,6 +520,8 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
         state.status = 'pending';
         state.error = undefined;
         state.generation++;
+        // Build new loadable for pending state
+        state.cachedLoadable = { status: 'pending', value: undefined, error: undefined };
         const expectedGeneration = state.generation;
         state.promise = Promise.all(pendingDeps).then(
             () => {
@@ -541,6 +545,8 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
                 state.status = 'rejected';
                 state.error = error;
                 state.promise = undefined;
+                // Build new loadable for rejected state
+                state.cachedLoadable = { status: 'rejected', value: undefined, error };
                 notify(state);
                 throw error;
             },
@@ -555,6 +561,8 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
         state.status = 'rejected';
         state.error = error;
         state.promise = undefined;
+        // Build new loadable for rejected state
+        state.cachedLoadable = { status: 'rejected', value: undefined, error };
         wireDepSubscriptions(state, artifactRef, depStates);
         return;
     }
@@ -569,7 +577,8 @@ function markResolved(state: ArtifactState, value: unknown): void {
     state.error = undefined;
     state.promise = undefined;
     state.updatedAt = Date.now();
-    state.cachedLoadable = undefined; // Clear cache on status change
+    // Build new loadable for resolved state
+    state.cachedLoadable = { status: 'resolved', value, error: undefined };
     scheduleRevalidate(state);
 }
 
@@ -580,7 +589,8 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
         state.status = 'pending';
         state.error = undefined;
         state.generation++;
-        state.cachedLoadable = undefined; // Clear cache on status change
+        // Build new loadable for pending state
+        state.cachedLoadable = { status: 'pending', value: undefined, error: undefined };
         const expectedGeneration = state.generation;
         state.promise = Promise.resolve(nextValue).then(
             (resolvedValue) => {
@@ -605,7 +615,8 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
                 state.status = 'rejected';
                 state.error = error;
                 state.promise = undefined;
-                state.cachedLoadable = undefined; // Clear cache on status change
+                // Build new loadable for rejected state
+                state.cachedLoadable = { status: 'rejected', value: undefined, error };
                 notify(state);
                 throw error;
             },
@@ -1053,28 +1064,23 @@ export function useArtifactLoadable<T>(candidate: Artifact<T>): ArtifactLoadable
 
     const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
     
-    // getSnapshot must be pure - only reads from state
-    // The loadable is built and cached on state whenever status changes
+    // getSnapshot is read-only - loadable is built at mutation sites
     const getSnapshot = useCallback((): ArtifactLoadable<T> => {
-        // Check if we have a cached loadable
+        // Return cached loadable built at mutation site, or build one if missing (e.g., initial state)
         const cached = state.cachedLoadable as ArtifactLoadable<T> | undefined;
         if (cached) {
             return cached;
         }
         
-        // Build new loadable and cache it on the state
-        let loadable: ArtifactLoadable<T>;
+        // Fallback: build loadable for initial state (before any mutations)
+        // This should only happen on first read of a static artifact
         if (state.status === 'pending') {
-            loadable = { status: 'pending', value: undefined, error: undefined };
-        } else if (state.status === 'rejected') {
-            loadable = { status: 'rejected', value: undefined, error: state.error };
-        } else {
-            loadable = { status: 'resolved', value: state.value as T, error: undefined };
+            return { status: 'pending', value: undefined, error: undefined };
         }
-        
-        // Cache it on the state
-        state.cachedLoadable = loadable;
-        return loadable;
+        if (state.status === 'rejected') {
+            return { status: 'rejected', value: undefined, error: state.error };
+        }
+        return { status: 'resolved', value: state.value as T, error: undefined };
     }, [state]);
 
     return useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
