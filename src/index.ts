@@ -75,6 +75,7 @@ type ArtifactState = {
     revalidateTimer: ReturnType<typeof setTimeout> | undefined;
     initScratch: InitScratch | null;
     generation: number;
+    cachedLoadable: unknown | undefined;
 };
 
 function createFamily(initializer: unknown, options: ArtifactOptions = {}): ArtifactFamily {
@@ -329,6 +330,7 @@ function getOrCreateState(artifactRef: Artifact): ArtifactState {
         revalidateTimer: undefined,
         initScratch: null,
         generation: 0,
+        cachedLoadable: undefined,
     };
 
     artifactRef.family.instances.set(artifactRef.key, state);
@@ -567,6 +569,7 @@ function markResolved(state: ArtifactState, value: unknown): void {
     state.error = undefined;
     state.promise = undefined;
     state.updatedAt = Date.now();
+    state.cachedLoadable = undefined; // Clear cache on status change
     scheduleRevalidate(state);
 }
 
@@ -577,6 +580,7 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
         state.status = 'pending';
         state.error = undefined;
         state.generation++;
+        state.cachedLoadable = undefined; // Clear cache on status change
         const expectedGeneration = state.generation;
         state.promise = Promise.resolve(nextValue).then(
             (resolvedValue) => {
@@ -601,6 +605,7 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
                 state.status = 'rejected';
                 state.error = error;
                 state.promise = undefined;
+                state.cachedLoadable = undefined; // Clear cache on status change
                 notify(state);
                 throw error;
             },
@@ -1042,25 +1047,22 @@ export type ArtifactLoadable<T> =
  * }
  * ```
  */
-// Cache loadables per state to ensure stable references for the same generation
-const loadableCache = new WeakMap<ArtifactState, { generation: number; loadable: ArtifactLoadable<unknown> }>();
-
 export function useArtifactLoadable<T>(candidate: Artifact<T>): ArtifactLoadable<T> {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
 
     const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
     
-    // getSnapshot must return the same object for the same generation to avoid infinite loops
+    // getSnapshot must be pure - only reads from state
+    // The loadable is built and cached on state whenever status changes
     const getSnapshot = useCallback((): ArtifactLoadable<T> => {
-        const cached = loadableCache.get(state);
-        
-        // Return cached loadable if generation matches
-        if (cached && cached.generation === state.generation) {
-            return cached.loadable as ArtifactLoadable<T>;
+        // Check if we have a cached loadable
+        const cached = state.cachedLoadable as ArtifactLoadable<T> | undefined;
+        if (cached) {
+            return cached;
         }
         
-        // Create new loadable for this generation
+        // Build new loadable and cache it on the state
         let loadable: ArtifactLoadable<T>;
         if (state.status === 'pending') {
             loadable = { status: 'pending', value: undefined, error: undefined };
@@ -1070,8 +1072,8 @@ export function useArtifactLoadable<T>(candidate: Artifact<T>): ArtifactLoadable
             loadable = { status: 'resolved', value: state.value as T, error: undefined };
         }
         
-        // Cache it
-        loadableCache.set(state, { generation: state.generation, loadable });
+        // Cache it on the state
+        state.cachedLoadable = loadable;
         return loadable;
     }, [state]);
 

@@ -142,6 +142,56 @@ describe('getArtifactStatus', () => {
 });
 
 describe('useArtifactLoadable', () => {
+    it('updates when promise resolves after mount', async () => {
+        let resolve!: (value: string) => void;
+        const ref = artifact(
+            new Promise<string>((r) => {
+                resolve = r;
+            }),
+        );
+
+        const { result } = renderHook(() => useArtifactLoadable(ref));
+
+        // Initially pending
+        expect(result.current.status).toBe('pending');
+        expect(result.current.value).toBeUndefined();
+
+        // Resolve the promise
+        await act(async () => {
+            resolve('done');
+            await waitForValue(ref);
+        });
+
+        // Hook should update to resolved
+        expect(result.current.status).toBe('resolved');
+        expect(result.current.value).toBe('done');
+    });
+
+    it('updates when promise rejects after mount', async () => {
+        const error = new Error('failed');
+        let reject!: (error: Error) => void;
+        const ref = artifact(
+            new Promise<string>((_, r) => {
+                reject = r;
+            }),
+        );
+
+        const { result } = renderHook(() => useArtifactLoadable(ref));
+
+        // Initially pending
+        expect(result.current.status).toBe('pending');
+
+        // Reject the promise
+        await act(async () => {
+            reject(error);
+            await waitForValue(ref).catch(() => {});
+        });
+
+        // Hook should update to rejected
+        expect(result.current.status).toBe('rejected');
+        expect(result.current.error).toBe(error);
+    });
+
     it('returns resolved loadable for static values', () => {
         const ref = artifact(42);
         const { result } = renderHook(() => useArtifactLoadable(ref));
@@ -223,7 +273,7 @@ describe('useArtifactLoadable', () => {
         expect(result.current.error).toBe(error);
     });
 
-    it('re-renders when status changes after reset', async () => {
+    it('artifact status changes after reset (imperative API)', async () => {
         let resolvers: Array<() => void> = [];
         let callCount = 0;
         const ref = artifact(
@@ -360,17 +410,16 @@ describe('useArtifactLoadable', () => {
         expect(readArtifact(ref)).toEqual({ count: 2 });
     });
 
-    it('supports SSR with getServerSnapshot', () => {
+    it('works synchronously with static values', () => {
         const ref = artifact(42);
 
-        // Simulate SSR by calling the hook without act/async
         const { result } = renderHook(() => useArtifactLoadable(ref));
 
         expect(result.current.status).toBe('resolved');
         expect(result.current.value).toBe(42);
     });
 
-    it('getArtifactStatus supports SSR and returns status immediately', () => {
+    it('getArtifactStatus works synchronously with static values', () => {
         const ref = artifact('static');
         expect(getArtifactStatus(ref)).toBe('resolved');
     });
