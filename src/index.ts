@@ -8,7 +8,10 @@ const STORAGE_KEYS = new Set<string>();
 export interface ArtifactOptions {
     maxAge?: number;
     revalidate?: 'on-read' | 'auto';
-
+    /** Stable cache key for parameterized instances. Default: deterministic JSON.stringify with sorted object keys. */
+    key?: (params: any) => string;
+    /** Soft LRU cap on parameterized instances. Default: Infinity. Evict only unsubscribed instances. */
+    maxEntries?: number;
 }
 
 /** Options for `artifactWithStorage()`. */
@@ -27,6 +30,8 @@ export type ArtifactInitializerArg<P extends object = object> = { get: ArtifactG
 type ResolvedOptions = {
     maxAge: number;
     revalidate: 'on-read' | 'auto';
+    key?: (params: any) => string;
+    maxEntries: number;
 };
 
 type Listener = () => void;
@@ -35,6 +40,7 @@ type ArtifactFamily = {
     initializer: unknown;
     options: ResolvedOptions;
     instances: Map<string, ArtifactState>;
+    lruOrder: string[];
 };
 
 /**
@@ -77,9 +83,12 @@ function createFamily(initializer: unknown, options: ArtifactOptions = {}): Arti
         options: {
             maxAge: Infinity,
             revalidate: 'on-read',
+            key: options.key,
+            maxEntries: options.maxEntries ?? Infinity,
             ...options,
         },
         instances: new Map(),
+        lruOrder: [],
     };
 }
 
@@ -92,22 +101,50 @@ function isArtifactRef(value: unknown): value is Artifact {
     );
 }
 
+function stableStringify(value: unknown): string {
+    if (value === null) return 'null';
+    if (value === undefined) return 'undefined';
+    if (typeof value === 'string') return JSON.stringify(value);
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    
+    if (Array.isArray(value)) {
+        return '[' + value.map(stableStringify).join(',') + ']';
+    }
+    
+    if (typeof value === 'object') {
+        const keys = Object.keys(value).sort();
+        const pairs = keys.map(key => JSON.stringify(key) + ':' + stableStringify((value as Record<string, unknown>)[key]));
+        return '{' + pairs.join(',') + '}';
+    }
+    
+    return String(value);
+}
+
 function createArtifactRef(family: ArtifactFamily, args: unknown[] = []): Artifact {
     return {
         [ARTIFACT_REF]: true,
         family,
         args,
-        key: createCacheKey(args),
+        key: createCacheKey(family, args),
     };
 }
 
-function createCacheKey(args: unknown[]): string {
+function createCacheKey(family: ArtifactFamily, args: unknown[]): string {
     if (args.length === 0) {
         return DEFAULT_KEY;
     }
 
+    const { key: customKey } = family.options;
+    
+    if (customKey && args.length > 0) {
+        const params = args[0];
+        if (isPlainObject(params)) {
+            return customKey(params as object);
+        }
+    }
+
     try {
-        return JSON.stringify(args);
+        return stableStringify(args);
     } catch {
         return args.map((arg) => String(arg)).join('|');
     }
@@ -139,6 +176,56 @@ function isExpired(state: ArtifactState, family: ArtifactFamily): boolean {
     }
 
     return Date.now() - state.updatedAt > maxAge;
+}
+
+function updateLRU(family: ArtifactFamily, key: string): void {
+    const { lruOrder } = family;
+    const index = lruOrder.indexOf(key);
+    
+    if (index !== -1) {
+        lruOrder.splice(index, 1);
+    }
+    
+    lruOrder.push(key);
+}
+
+function evictLRU(family: ArtifactFamily): void {
+    const { maxEntries } = family.options;
+    const { instances, lruOrder } = family;
+    
+    if (!Number.isFinite(maxEntries)) {
+        return;
+    }
+    
+    // Need to evict before we exceed the limit
+    while (instances.size >= maxEntries) {
+        let evicted = false;
+        
+        for (const key of lruOrder) {
+            const state = instances.get(key);
+            
+            if (!state || state.listeners.size > 0) {
+                continue;
+            }
+            
+            clearRevalidateTimer(state);
+            teardownDeps(state);
+            instances.delete(key);
+            
+            const lruIndex = lruOrder.indexOf(key);
+            if (lruIndex !== -1) {
+                lruOrder.splice(lruIndex, 1);
+            }
+            
+            evicted = true;
+            break;
+        }
+        
+        // If we couldn't evict anything (all instances subscribed), stop trying
+        if (!evicted) {
+            break;
+        }
+    }
 }
 
 function clearRevalidateTimer(state: ArtifactState): void {
@@ -194,12 +281,16 @@ function getOrCreateState(artifactRef: Artifact): ArtifactState {
     const cached = artifactRef.family.instances.get(artifactRef.key);
 
     if (cached) {
+        updateLRU(artifactRef.family, artifactRef.key);
+        
         if (isExpired(cached, artifactRef.family)) {
             revalidateState(cached, artifactRef);
         }
 
         return cached;
     }
+
+    evictLRU(artifactRef.family);
 
     const state: ArtifactState = {
         artifactRef,
@@ -217,6 +308,7 @@ function getOrCreateState(artifactRef: Artifact): ArtifactState {
     };
 
     artifactRef.family.instances.set(artifactRef.key, state);
+    updateLRU(artifactRef.family, artifactRef.key);
 
     hydrateStateFromInitializer(state, artifactRef);
 
@@ -507,6 +599,7 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
 
 function subscribe(state: ArtifactState, listener: Listener): () => void {
     state.listeners.add(listener);
+    updateLRU(state.artifactRef.family, state.artifactRef.key);
 
     if (isExpired(state, state.artifactRef.family)) {
         revalidateState(state, state.artifactRef);

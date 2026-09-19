@@ -106,6 +106,29 @@ function UserProfile({ userId }) {
 
 Each unique set of parameters gets its own cached value -- `userArtifact({ id: 1 })` and `userArtifact({ id: 2 })` are independent.
 
+#### Cache key and LRU eviction
+
+By default, parameterized instances are cached by a stable JSON representation with sorted object keys -- `{ b: 2, a: 1 }` and `{ a: 1, b: 2 }` share the same instance. You can customize this behavior with the `key` and `maxEntries` options:
+
+```jsx
+const userArtifact = artifact(
+    ({ id }) => fetch(`/api/users/${id}`).then((res) => res.json()),
+    {
+        key: ({ id }) => `user:${id}`,
+        maxEntries: 200,
+    },
+);
+```
+
+**Options:**
+
+| Option | Default | Description |
+|---|---|---|
+| `key` | Stable `JSON.stringify` with sorted keys | Function that takes params and returns a cache key string |
+| `maxEntries` | `Infinity` | Soft LRU cap on parameterized instances. When exceeded, evicts least-recently-used instances that have no active subscribers |
+
+When `maxEntries` is set and the limit is reached, Artifact evicts the least-recently-used instance **only if it has no subscribers**. Instances are touched (moved to the end of the LRU queue) on every read, write, or subscribe. If all instances have active subscribers when the limit is reached, no eviction occurs and the cache can temporarily grow beyond `maxEntries`.
+
 ### Derived artifacts
 
 An artifact can read from other artifacts using the `get` function. When a dependency changes, the derived artifact recomputes automatically:
