@@ -327,7 +327,7 @@ During SSR, React calls `getServerSnapshot` to determine what value to render on
 
 Artifacts store their state in a **module-level mutable store** (`Map` inside each artifact family). This has important SSR implications:
 
-- **On the server:** Module state may persist between requests depending on your framework. Some frameworks (e.g., Next.js App Router) provide per-request module isolation; others may require manual cleanup between requests
+- **On the server:** Module state may persist between requests depending on your framework. Some frameworks aim to provide per-request module isolation (e.g., Next.js App Router), though the exact behavior can vary; other frameworks may require manual cleanup between requests
 - **On the client:** The module is loaded once per page, and artifact state persists for the lifetime of the page (until reload or navigation)
 - **Hydration:** The client starts with its own fresh module state. Server-rendered values are not automatically transferred to the client — the client re-initializes each artifact from scratch on mount
 
@@ -345,7 +345,7 @@ This call immediately attempts to read `localStorage.getItem('theme')`. On the s
 
 **Client-only guidance:**
 
-1. **Disable SSR for components** that use storage artifacts (recommended approach):
+The recommended approach is to disable SSR for components that use storage artifacts:
 
 ```jsx
 import dynamic from 'next/dynamic';
@@ -354,37 +354,22 @@ import dynamic from 'next/dynamic';
 const ThemeToggle = dynamic(() => import('./ThemeToggle'), { ssr: false });
 ```
 
-2. **Alternatively, use lazy initialization** with proper hook-safe structure:
+Inside `ThemeToggle.tsx` (which now only runs on the client), you can safely use lazy initialization:
 
 ```jsx
-// themeArtifact.ts - separate module
+// ThemeToggle.tsx - only runs client-side due to dynamic import above
+import { artifactWithStorage, useArtifact } from '@urlund/artifactjs';
+
 let themeArtifact;
-export function getThemeArtifact() {
-    if (!themeArtifact && typeof window !== 'undefined') {
+function getThemeArtifact() {
+    if (!themeArtifact) {
         themeArtifact = artifactWithStorage('theme', 'light');
     }
     return themeArtifact;
 }
 
-// ThemeToggleShell.tsx - outer shell
-'use client';
-import { getThemeArtifact } from './themeArtifact';
-import { ThemeToggleInner } from './ThemeToggleInner';
-
-export function ThemeToggle() {
-    const artifact = getThemeArtifact();
-    // Early return before any hooks (shell component has no hooks)
-    if (!artifact) return null;
-    return <ThemeToggleInner artifact={artifact} />;
-}
-
-// ThemeToggleInner.tsx - always calls hooks
-'use client';
-import { useArtifact } from '@urlund/artifactjs';
-
-export function ThemeToggleInner({ artifact }) {
-    // ✅ Safe: hook always called (no conditional logic before it)
-    const [theme, setTheme] = useArtifact(artifact);
+export default function ThemeToggle() {
+    const [theme, setTheme] = useArtifact(getThemeArtifact());
     return <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme}</button>;
 }
 ```
