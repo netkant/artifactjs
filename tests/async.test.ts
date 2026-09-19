@@ -110,6 +110,25 @@ describe('async artifacts', () => {
         expect(readArtifact(ref)).toBe('sync-value');
     });
 
+    it('does not surface error when slow promise rejects after newer sync overwrite', async () => {
+        let reject!: (error: Error) => void;
+        const promise = new Promise<string>((_, r) => {
+            reject = r;
+        });
+
+        const ref = artifact(promise);
+        expect(readArtifact(ref)).toBeUndefined();
+
+        writeArtifact(ref, 'new-value');
+        expect(readArtifact(ref)).toBe('new-value');
+
+        reject(new Error('old error'));
+        await new Promise((r) => setTimeout(r, 10));
+        
+        expect(readArtifact(ref)).toBe('new-value');
+        expect(() => readArtifact(ref)).not.toThrow();
+    });
+
     it('ignores stale reset when new value is written during async hydration', async () => {
         let resolveFirst!: (value: string) => void;
         let resolveSecond!: (value: string) => void;

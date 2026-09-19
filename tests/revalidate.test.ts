@@ -3,6 +3,7 @@ import {
     artifact,
     readArtifact,
     subscribeArtifact,
+    writeArtifact,
 } from '../src/index';
 import { waitForValue } from './wait';
 
@@ -126,17 +127,14 @@ describe('cache freshness (maxAge / revalidate)', () => {
         await waitForValue(ref);
         expect(readArtifact(ref)).toBe(1);
 
-        const next = waitForValue(ref, (v) => v === 2);
         await vi.advanceTimersByTimeAsync(1_000);
-
         expect(callCount).toBe(2);
 
-        resolveSecond(2);
-        await expect(next).resolves.toBe(2);
-        expect(readArtifact(ref)).toBe(2);
+        writeArtifact(ref, 99);
+        expect(readArtifact(ref)).toBe(99);
 
-        resolveFirst(999);
+        resolveSecond(2);
         await vi.advanceTimersByTimeAsync(100);
-        expect(readArtifact(ref)).toBe(2);
+        expect(readArtifact(ref)).toBe(99);
     });
 });

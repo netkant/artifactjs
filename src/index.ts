@@ -414,7 +414,9 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
             },
             (error: unknown) => {
                 if (state.generation !== expectedGeneration) {
-                    throw error;
+                    if (state.status === 'pending') return state.promise;
+                    if (state.status === 'rejected') throw state.error;
+                    return state.value;
                 }
                 state.status = 'rejected';
                 state.error = error;
@@ -470,7 +472,9 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
             },
             (error: unknown) => {
                 if (state.generation !== expectedGeneration) {
-                    throw error;
+                    if (state.status === 'pending') return state.promise;
+                    if (state.status === 'rejected') throw state.error;
+                    return state.value;
                 }
                 state.status = 'rejected';
                 state.error = error;
@@ -537,7 +541,7 @@ function writeState<T>(state: ArtifactState, nextValueOrUpdater: ArtifactUpdater
     const currentValue = state.status === 'resolved' ? (state.value as T) : undefined;
     const nextValue =
         typeof nextValueOrUpdater === 'function'
-            ? (nextValueOrUpdater as (current: T | undefined) => T)(currentValue)
+            ? (nextValueOrUpdater as (current: T | undefined) => T | Promise<T>)(currentValue)
             : nextValueOrUpdater;
 
     if (applyValue(state, nextValue)) {
@@ -572,12 +576,14 @@ export function artifactWithStorage<T = undefined>(
     options: ArtifactStorageOptions<T> = {},
 ): Artifact<T> {
     if (STORAGE_KEYS.has(key)) {
-        console.warn(
-            `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
-            `Each key should be created only once per application. ` +
-            `Same-tab instances with the same key do not sync via the storage event. ` +
-            `For more information, see the README.`
-        );
+        if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+            console.warn(
+                `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
+                `Each key should be created only once per application. ` +
+                `Same-tab instances with the same key do not sync via the storage event. ` +
+                `For more information, see the README.`
+            );
+        }
     }
     STORAGE_KEYS.add(key);
 
