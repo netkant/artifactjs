@@ -177,6 +177,33 @@ describe('async artifacts', () => {
         await expect(p).resolves.toBe('newer-sync-value');
         expect(readArtifact(ref)).toBe('newer-sync-value');
     });
+
+    it('does not overwrite rejected status when old promise resolves after reset to sync-throwing initializer', async () => {
+        let resolveFirst!: (value: string) => void;
+        let callCount = 0;
+
+        const ref = artifact(() => {
+            callCount++;
+            if (callCount === 1) {
+                return new Promise<string>((r) => {
+                    resolveFirst = r;
+                });
+            }
+            throw new Error('sync error');
+        });
+
+        readArtifact(ref);
+        expect(callCount).toBe(1);
+
+        resetArtifact(ref);
+        expect(callCount).toBe(2);
+        expect(() => readArtifact(ref)).toThrow('sync error');
+
+        resolveFirst('late value');
+        await new Promise((r) => setTimeout(r, 10));
+        
+        expect(() => readArtifact(ref)).toThrow('sync error');
+    });
 });
 
 describe('resolveArtifact', () => {

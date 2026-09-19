@@ -211,6 +211,9 @@ describe('artifactWithStorage', () => {
         localStorage.removeItem(key);
         resetArtifact(ref);
         expect(readArtifact(ref)).toBe('fallback');
+        
+        // The fallback is written back to storage by the subscriber
+        expect(localStorage.getItem(key)).toBe(JSON.stringify('fallback'));
     });
 
     it('resumes persistence after a storage event throws during deserialization', () => {

@@ -431,8 +431,10 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
     }
 
     if (error) {
+        state.generation++;
         state.status = 'rejected';
         state.error = error;
+        state.promise = undefined;
         wireDepSubscriptions(state, artifactRef, depStates);
         return;
     }
@@ -632,7 +634,7 @@ export function artifactWithStorage<T = undefined>(
         }
     }
 
-    const base = artifact(readFromStorage);
+    const base = artifact(() => readFromStorage());
     const state = getOrCreateState(base);
 
     let syncing = false;
