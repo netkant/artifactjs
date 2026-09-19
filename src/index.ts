@@ -1042,35 +1042,8 @@ export type ArtifactLoadable<T> =
  * }
  * ```
  */
-// Cache for loadable objects - maps state + generation to a stable loadable
-// This is populated lazily but outside of React render
-const loadableCache = new WeakMap<ArtifactState, Map<number, ArtifactLoadable<unknown>>>();
-
-function getLoadableForState<T>(state: ArtifactState): ArtifactLoadable<T> {
-    let generationMap = loadableCache.get(state);
-    if (!generationMap) {
-        generationMap = new Map();
-        loadableCache.set(state, generationMap);
-    }
-
-    const cached = generationMap.get(state.generation) as ArtifactLoadable<T> | undefined;
-    if (cached) {
-        return cached;
-    }
-
-    // Create new loadable for this generation
-    let loadable: ArtifactLoadable<T>;
-    if (state.status === 'pending') {
-        loadable = { status: 'pending', value: undefined, error: undefined };
-    } else if (state.status === 'rejected') {
-        loadable = { status: 'rejected', value: undefined, error: state.error };
-    } else {
-        loadable = { status: 'resolved', value: state.value as T, error: undefined };
-    }
-
-    generationMap.set(state.generation, loadable as ArtifactLoadable<unknown>);
-    return loadable;
-}
+// Cache loadables per state to ensure stable references for the same generation
+const loadableCache = new WeakMap<ArtifactState, { generation: number; loadable: ArtifactLoadable<unknown> }>();
 
 export function useArtifactLoadable<T>(candidate: Artifact<T>): ArtifactLoadable<T> {
     const artifactRef = ensureArtifactRef(candidate);
@@ -1078,9 +1051,28 @@ export function useArtifactLoadable<T>(candidate: Artifact<T>): ArtifactLoadable
 
     const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
     
-    // getSnapshot must be pure - it reads from cache which is stable per generation
+    // getSnapshot must return the same object for the same generation to avoid infinite loops
     const getSnapshot = useCallback((): ArtifactLoadable<T> => {
-        return getLoadableForState<T>(state);
+        const cached = loadableCache.get(state);
+        
+        // Return cached loadable if generation matches
+        if (cached && cached.generation === state.generation) {
+            return cached.loadable as ArtifactLoadable<T>;
+        }
+        
+        // Create new loadable for this generation
+        let loadable: ArtifactLoadable<T>;
+        if (state.status === 'pending') {
+            loadable = { status: 'pending', value: undefined, error: undefined };
+        } else if (state.status === 'rejected') {
+            loadable = { status: 'rejected', value: undefined, error: state.error };
+        } else {
+            loadable = { status: 'resolved', value: state.value as T, error: undefined };
+        }
+        
+        // Cache it
+        loadableCache.set(state, { generation: state.generation, loadable });
+        return loadable;
     }, [state]);
 
     return useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
