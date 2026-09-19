@@ -52,7 +52,7 @@ export type Artifact<T = unknown> = {
 /** Function artifact that is also usable as a default (no-args) reference. */
 export type ArtifactFactory<T, P extends object = object> = ((params?: P) => Artifact<T>) & Artifact<T>;
 
-export type ArtifactUpdater<T> = T | ((current: T | undefined) => T);
+export type ArtifactUpdater<T> = T | Promise<T> | ((current: T | undefined) => T | Promise<T>);
 
 type InitScratch = { get: ArtifactGet };
 
