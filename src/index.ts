@@ -109,6 +109,26 @@ function stableStringify(value: unknown): string {
     if (typeof value === 'string') return JSON.stringify(value);
     if (typeof value === 'number' || typeof value === 'boolean') return String(value);
     
+    // Handle special built-in types
+    if (value instanceof Date) {
+        return `Date:${value.toISOString()}`;
+    }
+    if (value instanceof RegExp) {
+        return `RegExp:${value.toString()}`;
+    }
+    if (value instanceof Map) {
+        const entries = Array.from(value.entries())
+            .map(([k, v]) => [stableStringify(k), stableStringify(v)])
+            .sort((a, b) => a[0].localeCompare(b[0]));
+        return `Map:[${entries.map(([k, v]) => `[${k},${v}]`).join(',')}]`;
+    }
+    if (value instanceof Set) {
+        const items = Array.from(value)
+            .map(stableStringify)
+            .sort();
+        return `Set:[${items.join(',')}]`;
+    }
+    
     if (Array.isArray(value)) {
         return '[' + value.map(stableStringify).join(',') + ']';
     }
@@ -206,7 +226,8 @@ function evictLRU(family: ArtifactFamily): void {
         for (const key of lruOrder) {
             const state = instances.get(key);
             
-            if (!state || state.listeners.size > 0) {
+            // Skip instances with subscribers or pending async operations
+            if (!state || state.listeners.size > 0 || state.status === 'pending') {
                 continue;
             }
             
@@ -223,7 +244,7 @@ function evictLRU(family: ArtifactFamily): void {
             break;
         }
         
-        // If we couldn't evict anything (all instances subscribed), stop trying
+        // If we couldn't evict anything (all instances subscribed or pending), stop trying
         if (!evicted) {
             break;
         }
@@ -639,6 +660,8 @@ function notify(state: ArtifactState): void {
 }
 
 function writeState<T>(state: ArtifactState, nextValueOrUpdater: ArtifactUpdater<T>): void {
+    updateLRU(state.artifactRef.family, state.artifactRef.key);
+    
     const currentValue = state.status === 'resolved' ? (state.value as T) : undefined;
     const nextValue =
         typeof nextValueOrUpdater === 'function'
@@ -768,7 +791,15 @@ export function artifact(initializer: unknown, options: ArtifactOptions = {}): A
     // Default maxEntries to 500 for parameterized functions, Infinity for static/promise artifacts
     const defaultMaxEntries = typeof initializer === 'function' ? 500 : Infinity;
     // Treat false as Infinity (disable eviction)
-    const maxEntries: number = options.maxEntries === false ? Infinity : (options.maxEntries ?? defaultMaxEntries);
+    // Treat invalid values (<= 0, NaN) as Infinity (disable eviction)
+    let maxEntries: number;
+    if (options.maxEntries === false) {
+        maxEntries = Infinity;
+    } else if (typeof options.maxEntries === 'number') {
+        maxEntries = options.maxEntries <= 0 || !Number.isFinite(options.maxEntries) ? Infinity : options.maxEntries;
+    } else {
+        maxEntries = defaultMaxEntries;
+    }
     
     const resolvedOptions = {
         maxAge: options.maxAge,

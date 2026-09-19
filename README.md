@@ -129,7 +129,9 @@ const userArtifact = artifact(
 
 **Eviction behavior:**
 
-When `maxEntries` is reached and a new parameterized instance is created, Artifact evicts the least-recently-used instance **only if it has no subscribers**. Instances are touched (moved to the end of the LRU queue) on every read, write, or subscribe. If all instances have active subscribers when the limit is reached, no eviction occurs and the cache can temporarily grow beyond `maxEntries`.
+When `maxEntries` is reached and a new parameterized instance is created, Artifact evicts the least-recently-used instance **only if it has no subscribers and is not pending**. Instances are touched (moved to the end of the LRU queue) on every read, write, or subscribe. If all instances have active subscribers or are pending async operations when the limit is reached, no eviction occurs and the cache can temporarily grow beyond `maxEntries`.
+
+Invalid `maxEntries` values (<= 0, NaN) are treated as `Infinity` (unlimited).
 
 **Opt-out:**
 

@@ -72,6 +72,68 @@ describe('parameterized cache options', () => {
             expect(first).not.toBe(second);
             expect(init).toHaveBeenCalledTimes(2);
         });
+
+        it('distinguishes different Date parameters', async () => {
+            const init = vi.fn(async ({ date }: { date: Date }) => ({ date: date.toISOString() }));
+            const data = artifact(init);
+
+            const date1 = new Date('2024-01-01');
+            const date2 = new Date('2024-01-02');
+
+            await waitForValue(data({ date: date1 }));
+            await waitForValue(data({ date: date2 }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
+        it('treats same Date values as identical', async () => {
+            const init = vi.fn(async ({ date }: { date: Date }) => ({ date: date.toISOString() }));
+            const data = artifact(init);
+
+            const date1 = new Date('2024-01-01');
+            const date2 = new Date('2024-01-01');
+
+            await waitForValue(data({ date: date1 }));
+            await waitForValue(data({ date: date2 }));
+
+            expect(init).toHaveBeenCalledTimes(1);
+        });
+
+        it('distinguishes different RegExp parameters', async () => {
+            const init = vi.fn(async ({ pattern }: { pattern: RegExp }) => ({ pattern: pattern.source }));
+            const data = artifact(init);
+
+            await waitForValue(data({ pattern: /test/ }));
+            await waitForValue(data({ pattern: /other/ }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
+        it('distinguishes different Map parameters', async () => {
+            const init = vi.fn(async ({ map }: { map: Map<string, number> }) => ({ size: map.size }));
+            const data = artifact(init);
+
+            const map1 = new Map([['a', 1]]);
+            const map2 = new Map([['b', 2]]);
+
+            await waitForValue(data({ map: map1 }));
+            await waitForValue(data({ map: map2 }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
+
+        it('distinguishes different Set parameters', async () => {
+            const init = vi.fn(async ({ set }: { set: Set<number> }) => ({ size: set.size }));
+            const data = artifact(init);
+
+            const set1 = new Set([1, 2]);
+            const set2 = new Set([3, 4]);
+
+            await waitForValue(data({ set: set1 }));
+            await waitForValue(data({ set: set2 }));
+
+            expect(init).toHaveBeenCalledTimes(2);
+        });
     });
 
     describe('maxEntries LRU eviction', () => {
@@ -232,6 +294,55 @@ describe('parameterized cache options', () => {
 
             unsub1();
             unsub2();
+        });
+
+        it('does not evict pending instances', async () => {
+            let resolveId1: ((value: { id: number }) => void) | undefined;
+            const promise1 = new Promise<{ id: number }>((resolve) => {
+                resolveId1 = resolve;
+            });
+
+            const init = vi.fn(async ({ id }: { id: number }) => {
+                if (id === 1) return promise1;
+                return { id };
+            });
+
+            const user = artifact(init, { maxEntries: 2 });
+
+            const ref1 = user({ id: 1 });
+            waitForValue(ref1);
+
+            await waitForValue(user({ id: 2 }));
+            await waitForValue(user({ id: 3 }));
+
+            expect(init).toHaveBeenCalledTimes(3);
+
+            resolveId1!({ id: 1 });
+            await waitForValue(ref1);
+
+            expect(readArtifact(ref1)).toEqual({ id: 1 });
+            expect(init).toHaveBeenCalledTimes(3);
+        });
+
+        it('treats invalid maxEntries as Infinity', async () => {
+            const init = vi.fn(async ({ id }: { id: number }) => ({ id }));
+            
+            const user1 = artifact(init, { maxEntries: 0 });
+            const user2 = artifact(init, { maxEntries: -10 });
+            const user3 = artifact(init, { maxEntries: NaN });
+
+            for (let i = 1; i <= 100; i++) {
+                await waitForValue(user1({ id: i }));
+            }
+
+            expect(init).toHaveBeenCalledTimes(100);
+
+            for (let i = 1; i <= 100; i++) {
+                const cached = readArtifact(user1({ id: i }));
+                expect(cached).toEqual({ id: i });
+            }
+
+            expect(init).toHaveBeenCalledTimes(100);
         });
     });
 
