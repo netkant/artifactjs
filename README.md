@@ -400,7 +400,7 @@ Artifacts store their state in a **module-level mutable store** (`Map` inside ea
 - **On the client:** The module is loaded once per page, and artifact state persists for the lifetime of the page (until reload or navigation)
 - **Hydration:** The client starts with its own fresh module state. Server-rendered values are not automatically transferred to the client — the client re-initializes each artifact from scratch on mount
 
-**Note:** ArtifactJS does not currently have SSR-specific tests. The library relies on React's `useSyncExternalStore` for SSR compatibility. If you encounter issues with your SSR framework, please report them on GitHub.
+**Note:** Basic SSR behavior is covered by `tests/ssr.test.tsx`, which uses `renderToString` in the same process as the client render. The library relies on React's `useSyncExternalStore` for SSR compatibility. These tests do not simulate true multi-request isolation or cross-tab hydration mismatches. If you encounter issues with your SSR framework (especially around per-request module state isolation), please report them on GitHub.
 
 ### Storage artifacts and SSR
 
