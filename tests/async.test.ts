@@ -160,6 +160,23 @@ describe('async artifacts', () => {
         await new Promise((r) => setTimeout(r, 10));
         expect(readArtifact(ref)).toBe('second');
     });
+
+    it('resolveArtifact returns newer value when slow promise resolves after sync write', async () => {
+        let resolveAsync!: (value: string) => void;
+        const slowPromise = new Promise<string>((r) => {
+            resolveAsync = r;
+        });
+
+        const ref = artifact(slowPromise);
+        const p = resolveArtifact(ref);
+
+        writeArtifact(ref, 'newer-sync-value');
+        expect(readArtifact(ref)).toBe('newer-sync-value');
+
+        resolveAsync('slow-async-value');
+        await expect(p).resolves.toBe('newer-sync-value');
+        expect(readArtifact(ref)).toBe('newer-sync-value');
+    });
 });
 
 describe('resolveArtifact', () => {

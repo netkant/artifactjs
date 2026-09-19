@@ -461,7 +461,9 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
         state.promise = Promise.resolve(nextValue).then(
             (resolvedValue) => {
                 if (state.generation !== expectedGeneration) {
-                    return resolvedValue;
+                    if (state.status === 'pending') return state.promise;
+                    if (state.status === 'rejected') throw state.error;
+                    return state.value;
                 }
                 if (state.status === 'resolved' && Object.is(state.value, resolvedValue)) {
                     return resolvedValue;
@@ -575,18 +577,6 @@ export function artifactWithStorage<T = undefined>(
     initialValue?: T,
     options: ArtifactStorageOptions<T> = {},
 ): Artifact<T> {
-    if (STORAGE_KEYS.has(key)) {
-        if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-            console.warn(
-                `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
-                `Each key should be created only once per application. ` +
-                `Same-tab instances with the same key do not sync via the storage event. ` +
-                `For more information, see the README.`
-            );
-        }
-    }
-    STORAGE_KEYS.add(key);
-
     const fallback = initialValue as T;
     const {
         storage: getStorage = () => localStorage,
@@ -597,6 +587,21 @@ export function artifactWithStorage<T = undefined>(
     function resolveStorage(): Storage {
         return typeof getStorage === 'function' ? getStorage() : getStorage;
     }
+
+    const storageBackend = resolveStorage();
+    const compositeKey = `${storageBackend === sessionStorage ? 'session' : 'local'}:${key}`;
+
+    if (STORAGE_KEYS.has(compositeKey)) {
+        if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+            console.warn(
+                `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
+                `Each key should be created only once per application. ` +
+                `Same-tab instances with the same key do not sync via the storage event. ` +
+                `For more information, see the README.`
+            );
+        }
+    }
+    STORAGE_KEYS.add(compositeKey);
 
     function readFromStorage(): T {
         try {
