@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Error recovery and status inspection API**: Added new functions for checking artifact status and handling errors without Suspense or Error Boundaries
+  - `getArtifactStatus(ref)`: Returns `'pending' | 'resolved' | 'rejected'` for inspecting artifact status outside React (triggers hydration as a side effect)
+  - `useArtifactLoadable(ref)`: Returns `{ status, value, error }` without suspending or throwing, enabling custom loading/error UIs
+  - `ArtifactLoadable<T>` type: Discriminated union type representing all possible artifact states
+  - During revalidation, loadable status becomes `'pending'` with `value: undefined` (no stale-while-revalidate behavior)
 - **Parameterized cache options**: Added optional `key` and `maxEntries` configuration for parameterized artifacts
   - `key`: Custom function to generate cache keys for parameterized instances (default: deterministic JSON.stringify with sorted object keys)
   - `maxEntries`: Soft LRU cap on parameterized instances with automatic eviction of unsubscribed, non-pending instances (default: Infinity / unlimited)

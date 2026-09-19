@@ -1,4 +1,4 @@
-import { useCallback, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
@@ -70,7 +70,7 @@ type ArtifactState = {
     error: unknown;
     promise: Promise<unknown> | undefined;
     dependencies: Set<ArtifactState> | null;
-    depCleanups: Array<() => void> | null;
+    depCleanups: Array<(() => void)> | null;
     updatedAt: number;
     revalidateTimer: ReturnType<typeof setTimeout> | undefined;
     initScratch: InitScratch | null;
@@ -964,9 +964,16 @@ export function subscribeArtifact<T>(candidate: Artifact<T>, listener: Listener)
  * Get the current status of an artifact.
  * 
  * Returns:
- * - `'pending'` — initializer is running, value not yet available
- * - `'resolved'` — value is available (may be stale during revalidation)
+ * - `'pending'` — initializer is running or revalidating, value not available
+ * - `'resolved'` — value is available and fresh
  * - `'rejected'` — initializer threw an error
+ * 
+ * **Side effect:** Calling this function triggers hydration (runs the initializer)
+ * if the artifact hasn't been accessed yet.
+ * 
+ * **Revalidation behavior:** During revalidation (when an expired artifact is refreshing),
+ * this returns `'pending'` (not `'resolved'` with a stale value). Use `readArtifact()`
+ * if you need the stale value during revalidation.
  * 
  * Use this to implement custom loading states, retry logic, or status-aware UIs.
  * 
@@ -1001,6 +1008,11 @@ export type ArtifactLoadable<T> =
  * this hook returns a loadable object that lets you handle all states explicitly
  * in your component.
  * 
+ * **Revalidation behavior:** During revalidation (when an expired artifact is refreshing),
+ * the loadable status becomes `'pending'` with `value: undefined`. There is no
+ * stale-while-revalidate behavior — the previous value is not preserved. If you need
+ * the stale value during revalidation, use `readArtifact()` instead.
+ * 
  * Use this for custom loading states, inline error messages, or retry UIs without
  * needing Suspense or Error Boundaries.
  * 
@@ -1015,9 +1027,12 @@ export type ArtifactLoadable<T> =
  *   }
  * 
  *   if (loadable.status === 'rejected') {
+ *     const errorMessage = loadable.error instanceof Error
+ *       ? loadable.error.message
+ *       : String(loadable.error);
  *     return (
  *       <div>
- *         <p>Error: {loadable.error.message}</p>
+ *         <p>Error: {errorMessage}</p>
  *         <button onClick={reset}>Retry</button>
  *       </div>
  *     );
@@ -1027,54 +1042,45 @@ export type ArtifactLoadable<T> =
  * }
  * ```
  */
+// Cache for loadable objects - maps state + generation to a stable loadable
+// This is populated lazily but outside of React render
+const loadableCache = new WeakMap<ArtifactState, Map<number, ArtifactLoadable<unknown>>>();
+
+function getLoadableForState<T>(state: ArtifactState): ArtifactLoadable<T> {
+    let generationMap = loadableCache.get(state);
+    if (!generationMap) {
+        generationMap = new Map();
+        loadableCache.set(state, generationMap);
+    }
+
+    const cached = generationMap.get(state.generation) as ArtifactLoadable<T> | undefined;
+    if (cached) {
+        return cached;
+    }
+
+    // Create new loadable for this generation
+    let loadable: ArtifactLoadable<T>;
+    if (state.status === 'pending') {
+        loadable = { status: 'pending', value: undefined, error: undefined };
+    } else if (state.status === 'rejected') {
+        loadable = { status: 'rejected', value: undefined, error: state.error };
+    } else {
+        loadable = { status: 'resolved', value: state.value as T, error: undefined };
+    }
+
+    generationMap.set(state.generation, loadable as ArtifactLoadable<unknown>);
+    return loadable;
+}
+
 export function useArtifactLoadable<T>(candidate: Artifact<T>): ArtifactLoadable<T> {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
 
-    // Cache the last loadable to return stable references
-    const cacheRef = useRef<{
-        generation: number;
-        status: string;
-        value: unknown;
-        error: unknown;
-        loadable: ArtifactLoadable<T>;
-    } | null>(null);
-
     const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
     
-    const getSnapshot = useCallback(() => {
-        // Check if we can reuse the cached loadable
-        const cache = cacheRef.current;
-        if (
-            cache &&
-            cache.generation === state.generation &&
-            cache.status === state.status &&
-            Object.is(cache.value, state.value) &&
-            Object.is(cache.error, state.error)
-        ) {
-            return cache.loadable;
-        }
-
-        // Create new loadable
-        let loadable: ArtifactLoadable<T>;
-        if (state.status === 'pending') {
-            loadable = { status: 'pending', value: undefined, error: undefined };
-        } else if (state.status === 'rejected') {
-            loadable = { status: 'rejected', value: undefined, error: state.error };
-        } else {
-            loadable = { status: 'resolved', value: state.value as T, error: undefined };
-        }
-
-        // Cache it
-        cacheRef.current = {
-            generation: state.generation,
-            status: state.status,
-            value: state.value,
-            error: state.error,
-            loadable,
-        };
-
-        return loadable;
+    // getSnapshot must be pure - it reads from cache which is stable per generation
+    const getSnapshot = useCallback((): ArtifactLoadable<T> => {
+        return getLoadableForState<T>(state);
     }, [state]);
 
     return useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);

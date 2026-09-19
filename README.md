@@ -393,6 +393,10 @@ if (status === 'pending') {
 }
 ```
 
+**Important notes:**
+- **Side effect:** Calling `getArtifactStatus()` triggers hydration (runs the initializer) if the artifact hasn't been accessed yet.
+- **Revalidation:** When an artifact with `maxAge` expires and revalidates, this returns `'pending'` (not `'resolved'` with a stale value). The status transitions from `'resolved'` → `'pending'` → `'resolved'` during refresh. Use `readArtifact()` if you need to read the stale value while revalidation is in progress.
+
 #### `useArtifactLoadable(ref)` — status-aware hook
 
 Returns `{ status, value, error }` without suspending or throwing. Use this to build custom loading states, inline error messages, or retry UIs:
@@ -409,9 +413,12 @@ function UserProfile({ userId }) {
     }
 
     if (loadable.status === 'rejected') {
+        const errorMessage = loadable.error instanceof Error 
+            ? loadable.error.message 
+            : String(loadable.error);
         return (
             <div>
-                <p>Error: {loadable.error.message}</p>
+                <p>Error: {errorMessage}</p>
                 <button onClick={reset}>Retry</button>
             </div>
         );
@@ -425,9 +432,15 @@ Unlike `useArtifactValue` (which suspends during loading and throws on error), `
 
 **Loadable object:**
 
-- `{ status: 'pending', value: undefined, error: undefined }` — initializer is running
-- `{ status: 'resolved', value: T, error: undefined }` — value is available
+- `{ status: 'pending', value: undefined, error: undefined }` — initializer is running or revalidating
+- `{ status: 'resolved', value: T, error: undefined }` — value is available and fresh
 - `{ status: 'rejected', value: undefined, error: unknown }` — initializer threw an error
+
+**Revalidation behavior:** When an artifact with `maxAge` expires and revalidates:
+- The loadable status becomes `'pending'` with `value: undefined`
+- There is **no stale-while-revalidate** behavior — the previous value is discarded
+- This matches React Suspense semantics: the component shows `'pending'` state during refresh
+- If you need to keep displaying the stale value during revalidation, use `readArtifact()` in your pending state (it returns the stale value during revalidation)
 
 #### Retry recipe with `useResetArtifact` + Error Boundary
 

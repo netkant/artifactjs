@@ -67,8 +67,7 @@ describe('getArtifactStatus', () => {
     it('returns "rejected" when promise rejects', async () => {
         const ref = artifact(Promise.reject(new Error('rejected')));
         // Need to trigger hydration
-        readArtifact(ref);
-        await new Promise((r) => setTimeout(r, 10));
+        await waitForValue(ref).catch(() => {});
         expect(getArtifactStatus(ref)).toBe('rejected');
     });
 
@@ -177,7 +176,7 @@ describe('useArtifactLoadable', () => {
             await waitForValue(ref);
         });
 
-        expect(result.current.status).toBe('resolved');
+        await waitFor(() => expect(result.current.status).toBe('resolved'));
         expect(result.current.value).toBe('done');
     });
 
@@ -188,10 +187,10 @@ describe('useArtifactLoadable', () => {
         const { result } = renderHook(() => useArtifactLoadable(ref));
 
         await act(async () => {
-            await new Promise((r) => setTimeout(r, 10));
+            await waitForValue(ref).catch(() => {});
         });
 
-        expect(result.current.status).toBe('rejected');
+        await waitFor(() => expect(result.current.status).toBe('rejected'));
         expect(result.current.value).toBeUndefined();
         expect(result.current.error).toBe(error);
     });
@@ -238,7 +237,7 @@ describe('useArtifactLoadable', () => {
 
         await act(async () => {
             reject(error);
-            await new Promise((r) => setTimeout(r, 10));
+            await waitForValue(users).catch(() => {});
         });
 
         expect(screen.getByTestId('error-message').textContent).toBe('Error: fetch failed');
@@ -355,7 +354,7 @@ describe('useArtifactLoadable', () => {
 
         await act(async () => {
             reject(new Error('network error'));
-            await new Promise((r) => setTimeout(r, 10));
+            await waitForValue(users).catch(() => {});
         });
 
         expect(screen.getByTestId('status').textContent).toBe('Error');
@@ -370,7 +369,7 @@ describe('useArtifactLoadable', () => {
 
         await act(async () => {
             resolve([{ id: 1, name: 'Alice' }]);
-            await new Promise((r) => setTimeout(r, 10));
+            await waitForValue(users);
         });
 
         await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('Success: 1 users'));
@@ -442,10 +441,70 @@ describe('useArtifactLoadable', () => {
         });
 
         await act(async () => {
-            await new Promise((r) => setTimeout(r, 10));
+            await waitForValue(ref).catch(() => {});
         });
 
         expect(screen.getByTestId('inline-error').textContent).toBe('test error');
         expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('returns pending with undefined value during revalidation (no stale-while-revalidate)', async () => {
+        let resolvers: Array<() => void> = [];
+        let callCount = 0;
+        const ref = artifact(
+            () =>
+                new Promise<{ count: number }>((r) => {
+                    callCount++;
+                    resolvers.push(() => r({ count: callCount }));
+                }),
+            { maxAge: 50 },
+        );
+
+        const { result } = renderHook(() => useArtifactLoadable(ref));
+
+        // Initial load
+        expect(result.current.status).toBe('pending');
+        expect(result.current.value).toBeUndefined();
+
+        await act(async () => {
+            resolvers[0]();
+            await waitForValue(ref);
+        });
+
+        expect(result.current.status).toBe('resolved');
+        expect(result.current.value).toEqual({ count: 1 });
+
+        // Wait for expiry, which triggers revalidation
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 60));
+        });
+
+        // Should be pending during revalidation
+        await waitFor(() => expect(result.current.status).toBe('pending'));
+        expect(result.current.value).toBeUndefined();
+
+        // Resolve the revalidation
+        await act(async () => {
+            resolvers[1]();
+            await waitForValue(ref, (v) => v.count === 2);
+        });
+
+        expect(result.current.status).toBe('resolved');
+        expect(result.current.value).toEqual({ count: 2 });
+    });
+
+    it('supports SSR with getServerSnapshot', () => {
+        const ref = artifact(42);
+
+        // Simulate SSR by calling the hook without act/async
+        const { result } = renderHook(() => useArtifactLoadable(ref));
+
+        expect(result.current.status).toBe('resolved');
+        expect(result.current.value).toBe(42);
+    });
+
+    it('getArtifactStatus supports SSR and returns status immediately', () => {
+        const ref = artifact('static');
+        expect(getArtifactStatus(ref)).toBe('resolved');
     });
 });
