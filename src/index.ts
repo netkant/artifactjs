@@ -715,8 +715,8 @@ export function artifactWithStorage<T = undefined>(
     const compositeKey = `${storageBackend === sessionStorage ? 'session' : 'local'}:${key}`;
 
     if (STORAGE_KEYS.has(compositeKey)) {
-        const nodeEnv = (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV;
-        if (nodeEnv !== 'production') {
+        const proc = (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process;
+        if (proc && proc.env?.NODE_ENV !== 'production') {
             console.warn(
                 `[artifactWithStorage] Duplicate storage key detected: "${key}". ` +
                 `Each key should be created only once per application. ` +
