@@ -388,18 +388,18 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
     }
 
     // Check for circular dependency before entering computation
-    // If detected, mark as rejected and return without notifying (to prevent infinite recursion)
     if (COMPUTATION_STACK.has(state)) {
-        const error = createCircularDependencyError(state);
-        const statusChanged = state.status !== 'rejected' || state.error !== error;
-        if (statusChanged) {
+        // Only mark as rejected and notify if not already rejected with a circular dependency error
+        if (state.status !== 'rejected' || !(state.error instanceof Error && state.error.message.includes('Circular dependency detected'))) {
+            const error = createCircularDependencyError(state);
             state.generation++;
             state.status = 'rejected';
             state.error = error;
             state.promise = undefined;
             // Build new loadable for rejected state
             state.cachedLoadable = { status: 'rejected', value: undefined, error };
-            // Note: we deliberately don't notify here to avoid infinite recursion
+            // Notify subscribers of the rejection once when transitioning to rejected
+            notify(state);
         }
         return;
     }

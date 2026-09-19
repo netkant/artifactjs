@@ -496,7 +496,6 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 </ErrorBoundary>
 ```
 
-<<<<<<< HEAD
 ### Error recovery and status inspection
 
 For more control over loading states and error handling, Artifact provides status inspection APIs that let you handle errors inline without Error Boundaries:
@@ -618,7 +617,7 @@ const b = artifact(({ get }) => get(a) + 1);
 readArtifact(a); // throws: "Circular dependency detected..."
 ```
 
-This prevents infinite loops and stack overflows. Ensure your derived artifacts form a directed acyclic graph (DAG).
+This prevents infinite loops and stack overflows. Ensure your derived artifacts form a directed acyclic graph (DAG). Note that cycle detection uses a process-global computation stack, so cycles are detected correctly in SSR environments where multiple requests share the same process.
 
 ## Benchmarks
 
