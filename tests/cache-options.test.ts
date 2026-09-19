@@ -39,6 +39,15 @@ describe('parameterized cache options', () => {
             expect(first).not.toBe(second);
             expect(init).toHaveBeenCalledTimes(2);
         });
+
+        it('throws when custom key is set but params are not a plain object', async () => {
+            const user = artifact(
+                (arg: any) => Promise.resolve({ value: arg }),
+                { key: (params: any) => `key:${params}` },
+            );
+
+            expect(() => user(123)).toThrow('Custom key function requires params to be a plain object');
+        });
     });
 
     describe('default key stability', () => {

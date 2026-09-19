@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
 const ARTIFACT_REF = Symbol('artifact-ref');
 const DEFAULT_KEY = '__default__';
@@ -158,11 +158,12 @@ function createCacheKey(family: ArtifactFamily, args: unknown[]): string {
 
     const { key: customKey } = family.options;
     
-    if (customKey && args.length > 0) {
+    if (customKey) {
         const params = args[0];
-        if (isPlainObject(params)) {
-            return customKey(params as object);
+        if (!isPlainObject(params)) {
+            throw new Error('Custom key function requires params to be a plain object');
         }
+        return customKey(params as object);
     }
 
     try {
@@ -847,6 +848,11 @@ export function useSetArtifact<T>(candidate: Artifact<T>): (nextValueOrUpdater: 
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
 
+    // Pin the state in LRU to prevent eviction while this hook is mounted
+    useEffect(() => {
+        return subscribe(state, () => {});
+    }, [state]);
+
     return useCallback(
         (nextValueOrUpdater: ArtifactUpdater<T>) => {
             writeState(state, nextValueOrUpdater);
@@ -859,6 +865,11 @@ export function useSetArtifact<T>(candidate: Artifact<T>): (nextValueOrUpdater: 
 export function useResetArtifact<T>(candidate: Artifact<T>): () => void {
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
+
+    // Pin the state in LRU to prevent eviction while this hook is mounted
+    useEffect(() => {
+        return subscribe(state, () => {});
+    }, [state]);
 
     return useCallback(() => {
         resetState(state, artifactRef);
