@@ -10,7 +10,7 @@ export interface ArtifactOptions {
     revalidate?: 'on-read' | 'auto';
     /** Stable cache key for parameterized instances. Default: deterministic JSON.stringify with sorted object keys. */
     key?: (params: any) => string;
-    /** Soft LRU cap on parameterized instances. Default: Infinity. Evict only unsubscribed instances. */
+    /** Soft LRU cap on parameterized instances. Default: 500 for parameterized factories, Infinity for static/promise artifacts. Set to Infinity to disable. Evict only unsubscribed instances. */
     maxEntries?: number;
 }
 
@@ -84,7 +84,7 @@ function createFamily(initializer: unknown, options: ArtifactOptions = {}): Arti
             maxAge: Infinity,
             revalidate: 'on-read',
             key: options.key,
-            maxEntries: options.maxEntries ?? Infinity,
+            maxEntries: Infinity,
             ...options,
         },
         instances: new Map(),
@@ -763,7 +763,14 @@ export function artifact<T>(promise: Promise<T>, options?: ArtifactOptions): Art
 /** Create an artifact from a static value. */
 export function artifact<T>(value: T, options?: ArtifactOptions): Artifact<T>;
 export function artifact(initializer: unknown, options: ArtifactOptions = {}): Artifact | ArtifactFactory<unknown> {
-    const family = createFamily(initializer, options);
+    // Default maxEntries to 500 for parameterized functions, Infinity for static/promise artifacts
+    const defaultMaxEntries = typeof initializer === 'function' ? 500 : Infinity;
+    const resolvedOptions = {
+        ...options,
+        maxEntries: options.maxEntries ?? defaultMaxEntries,
+    };
+    
+    const family = createFamily(initializer, resolvedOptions);
 
     if (typeof initializer === 'function') {
         const factory = (...args: unknown[]) => createArtifactRef(family, args);
