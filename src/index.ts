@@ -702,6 +702,12 @@ export function useArtifactValue<T>(candidate: Artifact<T>): T {
     }, [state]);
 
     const getServerSnapshot = useCallback(() => {
+        if (state.status === 'pending') {
+            if (!state.promise) {
+                throw new Error('Pending artifact is missing a promise');
+            }
+            throw state.promise;
+        }
         if (state.status === 'rejected') {
             throw state.error;
         }

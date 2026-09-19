@@ -316,21 +316,22 @@ During SSR, React calls `getServerSnapshot` to determine what value to render on
 - If the values match, hydration succeeds silently
 - If they differ, React logs a hydration mismatch warning and performs a client-side re-render to fix the DOM
 
-**Current behavior (hypothesis):** ArtifactJS currently uses the same function for both server and client snapshots. This means:
+**Current behavior:** ArtifactJS provides the same behavior for both server and client snapshots via `useSyncExternalStore`:
 
-1. **Static artifacts** (`artifact(42)` or `artifact({ theme: "dark" })`) work fine — the value is the same on server and client
-2. **Async artifacts** that suspend will render the Suspense fallback on both server and client during initial load
-3. **Derived artifacts** that depend only on static or already-resolved artifacts should hydrate correctly
+1. **Static artifacts** (`artifact(42)` or `artifact({ theme: "dark" })`) render the same value on server and client
+2. **Async artifacts** suspend on both server and client during pending state, showing the Suspense fallback
+3. **Rejected artifacts** throw errors on both server and client, propagating to the nearest Error Boundary
+4. **Derived artifacts** that depend only on static or already-resolved artifacts hydrate correctly
 
 ### Module-level mutable state
 
 Artifacts store their state in a **module-level mutable store** (`Map` inside each artifact family). This has important SSR implications:
 
-- **On the server:** Each request should ideally get a fresh module graph. If your server framework (Next.js App Router, Remix, etc.) reuses the same JavaScript process across requests, artifact state may persist between requests unless you explicitly clear it
+- **On the server:** Module state may persist between requests depending on your framework. Next.js App Router provides per-request module isolation, but other frameworks may require manual cleanup between requests
 - **On the client:** The module is loaded once per page, and artifact state persists for the lifetime of the page (until reload or navigation)
 - **Hydration:** The client starts with its own fresh module state. Server-rendered values are not automatically transferred to the client — the client re-initializes each artifact from scratch on mount
 
-**Recommendation:** For SSR applications, reset artifacts between server requests or use a framework that isolates module state per request (e.g., Next.js App Router does this automatically).
+**Note:** ArtifactJS does not currently have comprehensive SSR tests. If you encounter issues with your SSR framework, please report them on GitHub.
 
 ### Storage artifacts and SSR
 
@@ -344,7 +345,7 @@ This call immediately attempts to read `localStorage.getItem('theme')`. On the s
 
 **Client-only guidance:**
 
-1. **Create storage artifacts only on the client.** Do not import or initialize `artifactWithStorage` in code that runs during SSR. Use dynamic imports or guard the creation with `typeof window !== 'undefined'`:
+1. **Create storage artifacts only on the client.** Do not import or initialize `artifactWithStorage` in code that runs during SSR. Use lazy initialization with a guard:
 
 ```jsx
 // ✅ Safe: lazily created on first client-side read
@@ -357,12 +358,14 @@ function getThemeArtifact() {
 }
 
 function ThemeToggle() {
-    const [theme, setTheme] = useArtifact(getThemeArtifact());
+    const artifact = getThemeArtifact();
+    if (!artifact) return null; // SSR fallback
+    const [theme, setTheme] = useArtifact(artifact);
     // ...
 }
 ```
 
-2. **Alternatively, guard the component** that uses storage artifacts so it only renders on the client:
+2. **Alternatively, disable SSR for components** that use storage artifacts:
 
 ```jsx
 import dynamic from 'next/dynamic';
@@ -371,20 +374,22 @@ import dynamic from 'next/dynamic';
 const ThemeToggle = dynamic(() => import('./ThemeToggle'), { ssr: false });
 ```
 
-3. **Or use a client-only wrapper component:**
+**Warning:** Do NOT use `'use client'` with module-level `artifactWithStorage` in Next.js App Router:
 
 ```jsx
-'use client'; // Next.js App Router directive
-
+// ❌ UNSAFE: Module code runs during SSR even in 'use client' components
+'use client';
 import { artifactWithStorage, useArtifact } from '@urlund/artifactjs';
 
-const themeArtifact = artifactWithStorage('theme', 'light');
+const themeArtifact = artifactWithStorage('theme', 'light'); // ❌ Crashes on server!
 
 export function ThemeToggle() {
     const [theme, setTheme] = useArtifact(themeArtifact);
     // ...
 }
 ```
+
+The `'use client'` directive only marks the component boundary—module-level code still executes during SSR and will crash when accessing `localStorage`.
 
 ### Hydration mismatches
 
@@ -398,14 +403,15 @@ To avoid mismatches, ensure artifacts either:
 - Return the same value on server and client (static values, deterministic derived values)
 - Are only used in client-only components (guarded with `typeof window !== 'undefined'` or framework-specific client-only wrappers)
 
-### Potential future improvement
+### Implementation notes
 
-The current implementation provides the same snapshot function for both server and client (`useSyncExternalStore(subscribe, getSnapshot, getSnapshot)`). A safer SSR implementation might use a dedicated `getServerSnapshot` that:
+ArtifactJS uses a dedicated `getServerSnapshot` function in `useSyncExternalStore` that matches the client-side `getSnapshot` behavior:
 
-- Returns a consistent initial/fallback value during SSR (e.g., `undefined` or the artifact's declared initial value)
-- Avoids triggering side effects or accessing client-only state
+- **Pending artifacts:** Both server and client suspend (throw promise), showing Suspense fallback
+- **Resolved artifacts:** Both return the resolved value
+- **Rejected artifacts:** Both throw the error, propagating to Error Boundary
 
-This would eliminate hydration warnings for artifacts that haven't resolved yet, but would require careful design to maintain backward compatibility and the current suspend-on-pending behavior. If you encounter SSR issues, please open an issue on GitHub with details about your framework and use case.
+This ensures consistent hydration behavior: the server and client render the same initial state, avoiding hydration mismatches for artifacts in any status (pending, resolved, or rejected).
 
 ## Error handling
 
