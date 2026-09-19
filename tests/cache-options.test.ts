@@ -171,6 +171,24 @@ describe('parameterized cache options', () => {
             expect(init).toHaveBeenCalledTimes(100);
         });
 
+        it('allows unlimited entries when maxEntries is false', async () => {
+            const init = vi.fn(async ({ id }: { id: number }) => ({ id }));
+            const user = artifact(init, { maxEntries: false });
+
+            for (let i = 1; i <= 100; i++) {
+                await waitForValue(user({ id: i }));
+            }
+
+            expect(init).toHaveBeenCalledTimes(100);
+
+            for (let i = 1; i <= 100; i++) {
+                const cached = readArtifact(user({ id: i }));
+                expect(cached).toEqual({ id: i });
+            }
+
+            expect(init).toHaveBeenCalledTimes(100);
+        });
+
         it('defaults to maxEntries of 500 for parameterized artifacts', async () => {
             const init = vi.fn(async ({ id }: { id: number }) => ({ id }));
             const user = artifact(init);

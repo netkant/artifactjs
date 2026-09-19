@@ -115,7 +115,7 @@ const userArtifact = artifact(
     ({ id }) => fetch(`/api/users/${id}`).then((res) => res.json()),
     {
         key: ({ id }) => `user:${id}`,
-        maxEntries: 200,  // or Infinity to disable the limit
+        maxEntries: 200,  // or Infinity / false to disable the limit
     },
 );
 ```
@@ -125,7 +125,7 @@ const userArtifact = artifact(
 | Option | Default | Description |
 |---|---|---|
 | `key` | Stable `JSON.stringify` with sorted keys | Function that takes params and returns a cache key string |
-| `maxEntries` | `500` | Soft LRU cap on parameterized instances. Set to `Infinity` to disable. When exceeded, evicts least-recently-used instances that have no active subscribers |
+| `maxEntries` | `500` | Soft LRU cap on parameterized instances. Set to `Infinity` or `false` to disable. When exceeded, evicts least-recently-used instances that have no active subscribers |
 
 **Eviction behavior:**
 
@@ -133,12 +133,19 @@ When `maxEntries` is reached and a new parameterized instance is created, Artifa
 
 **Opt-out:**
 
-Set `maxEntries: Infinity` to disable the automatic cache limit. This is useful for artifacts with a known finite set of parameter values or when you need complete control over cache lifetime:
+Set `maxEntries: Infinity` or `maxEntries: false` to disable the automatic cache limit. This is useful for artifacts with a known finite set of parameter values or when you need complete control over cache lifetime:
 
 ```jsx
+// Option 1: Use Infinity
 const configArtifact = artifact(
     ({ env }) => fetch(`/config/${env}.json`).then((res) => res.json()),
-    { maxEntries: Infinity },  // only 3 envs: dev, staging, prod
+    { maxEntries: Infinity },
+);
+
+// Option 2: Use false (more concise)
+const regionArtifact = artifact(
+    ({ region }) => fetch(`/regions/${region}.json`).then((res) => res.json()),
+    { maxEntries: false },
 );
 ```
 

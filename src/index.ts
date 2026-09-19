@@ -10,8 +10,8 @@ export interface ArtifactOptions {
     revalidate?: 'on-read' | 'auto';
     /** Stable cache key for parameterized instances. Default: deterministic JSON.stringify with sorted object keys. */
     key?: (params: any) => string;
-    /** Soft LRU cap on parameterized instances. Default: 500 for parameterized factories, Infinity for static/promise artifacts. Set to Infinity to disable. Evict only unsubscribed instances. */
-    maxEntries?: number;
+    /** Soft LRU cap on parameterized instances. Default: 500 for parameterized factories, Infinity for static/promise artifacts. Set to Infinity or false to disable. Evict only unsubscribed instances. */
+    maxEntries?: number | false;
 }
 
 /** Options for `artifactWithStorage()`. */
@@ -78,14 +78,16 @@ type ArtifactState = {
 };
 
 function createFamily(initializer: unknown, options: ArtifactOptions = {}): ArtifactFamily {
+    // Ensure maxEntries is a number (convert false to Infinity if needed)
+    const maxEntries: number = options.maxEntries === false ? Infinity : (options.maxEntries ?? Infinity);
+    
     return {
         initializer,
         options: {
-            maxAge: Infinity,
-            revalidate: 'on-read',
+            maxAge: options.maxAge ?? Infinity,
+            revalidate: options.revalidate ?? 'on-read',
             key: options.key,
-            maxEntries: Infinity,
-            ...options,
+            maxEntries,
         },
         instances: new Map(),
         lruOrder: [],
@@ -765,9 +767,14 @@ export function artifact<T>(value: T, options?: ArtifactOptions): Artifact<T>;
 export function artifact(initializer: unknown, options: ArtifactOptions = {}): Artifact | ArtifactFactory<unknown> {
     // Default maxEntries to 500 for parameterized functions, Infinity for static/promise artifacts
     const defaultMaxEntries = typeof initializer === 'function' ? 500 : Infinity;
+    // Treat false as Infinity (disable eviction)
+    const maxEntries: number = options.maxEntries === false ? Infinity : (options.maxEntries ?? defaultMaxEntries);
+    
     const resolvedOptions = {
-        ...options,
-        maxEntries: options.maxEntries ?? defaultMaxEntries,
+        maxAge: options.maxAge,
+        revalidate: options.revalidate,
+        key: options.key,
+        maxEntries,
     };
     
     const family = createFamily(initializer, resolvedOptions);
