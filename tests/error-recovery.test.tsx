@@ -191,72 +191,84 @@ describe('useArtifactLoadable', () => {
         expect(result.current.error).toBe(error);
     });
 
-    it('updates from resolved to pending when dependency becomes pending', async () => {
-        // Create a base artifact that starts resolved
-        const base = artifact(42);
-        expect(readArtifact(base)).toBe(42);
-
-        let resolveDep!: (value: number) => void;
-        const depRef = artifact(
-            new Promise<number>((r) => {
-                resolveDep = r;
-            }),
-        );
-
-        // Create derived artifact that reads the dep
+    it('updates from resolved to pending when dependency becomes pending (hydrate)', async () => {
+        // Create artifacts: base (static) and dep (will go pending)
+        const base = artifact(100);
+        const dep = artifact(1);
+        
+        // Derived artifact reads both
         const derived = artifact(({ get }) => {
-            return get(depRef) + get(base);
+            return get(base) + get(dep);
         });
 
-        // Mount hook on derived (starts as pending because dep is pending)
+        // Initial state: all resolved (100 + 1 = 101)
+        await waitForValue(derived);
         const { result } = renderHook(() => useArtifactLoadable(derived));
-        expect(result.current.status).toBe('pending');
+        
+        expect(result.current.status).toBe('resolved');
+        expect(result.current.value).toBe(101);
 
-        // Resolve the dependency
+        // Make dep pending by writing a promise to it
+        // This will trigger hydrate on derived with a pending dependency
+        let resolveDep!: (v: number) => void;
+        const pendingPromise = new Promise<number>((r) => { resolveDep = r; });
+        
         await act(async () => {
-            resolveDep(10);
+            writeArtifact(dep, pendingPromise);
+        });
+
+        // Hook should update to pending during hydrate
+        await waitFor(() => {
+            expect(result.current.status).toBe('pending');
+        });
+
+        // Resolve and verify final state
+        await act(async () => {
+            resolveDep(2);
             await waitForValue(derived);
         });
 
-        // Should now be resolved
         expect(result.current.status).toBe('resolved');
-        expect(result.current.value).toBe(52);
-
-        // Now make the base artifact change to trigger recomputation
-        // which will cause derived to go back to pending if we had another pending dep
-        // But we need a test that actually transitions from resolved → pending
-        // Let me create a better test with revalidation
+        expect(result.current.value).toBe(102);
     });
 
-    it('updates from resolved to rejected on synchronous error', async () => {
+    it('updates from resolved to rejected on synchronous hydrate error', async () => {
         const base = artifact(42);
         await waitForValue(base);
 
-        // Create a derived artifact that will throw
+        // Create a dependency that will be read during recomputation
+        const dep = artifact(10);
+        await waitForValue(dep);
+
         let shouldThrow = false;
         const derived = artifact(({ get }) => {
-            const val = get(base);
+            const b = get(base);
+            const d = get(dep);
             if (shouldThrow) {
-                throw new Error('sync error');
+                throw new Error('hydrate sync error');
             }
-            return val * 2;
+            return b + d;
         });
 
-        // Initial state should be resolved
+        // Initial state: derived is resolved
         await waitForValue(derived);
         const { result } = renderHook(() => useArtifactLoadable(derived));
+        
         expect(result.current.status).toBe('resolved');
-        expect(result.current.value).toBe(84);
+        expect(result.current.value).toBe(52);
 
-        // Trigger recomputation that throws
+        // Trigger recomputation that throws synchronously during hydrate
         await act(async () => {
             shouldThrow = true;
-            writeArtifact(base, 43); // This triggers recomputation
+            writeArtifact(base, 43);
         });
 
-        // Should now be rejected
-        expect(result.current.status).toBe('rejected');
-        expect(result.current.error).toEqual(new Error('sync error'));
+        // Hook should update to rejected
+        await waitFor(() => {
+            expect(result.current.status).toBe('rejected');
+        });
+        
+        expect(result.current.error).toEqual(new Error('hydrate sync error'));
     });
 
     it('returns resolved loadable for static values', () => {
