@@ -280,8 +280,10 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
 
     if (error) {
         const statusChanged = state.status !== 'rejected' || state.error !== error;
+        state.generation++;
         state.status = 'rejected';
         state.error = error;
+        state.promise = undefined;
         if (depsChanged) {
             wireDepSubscriptions(state, artifactRef, depStates);
         }
