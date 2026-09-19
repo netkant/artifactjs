@@ -151,4 +151,41 @@ describe('artifactWithStorage', () => {
         expect(() => writeArtifact(ref, 'new')).not.toThrow();
         expect(readArtifact(ref)).toBe('new');
     });
+
+    it('resumes persistence after a storage event throws during deserialization', () => {
+        const key = uniqueKey('event-throw');
+        let deserializeCallCount = 0;
+
+        // Initialize with a valid value
+        localStorage.setItem(key, JSON.stringify('initial'));
+
+        const ref = artifactWithStorage(key, 'fallback', {
+            deserialize: (v: string) => {
+                deserializeCallCount++;
+                // Throw only on the second call (triggered by storage event)
+                if (deserializeCallCount === 2) {
+                    throw new Error('deserialize error');
+                }
+                return JSON.parse(v) as string;
+            },
+        });
+
+        // First read should work
+        expect(readArtifact(ref)).toBe('initial');
+
+        // Trigger a storage event that will throw during deserialize
+        window.dispatchEvent(
+            new StorageEvent('storage', {
+                key,
+                newValue: JSON.stringify('from-event'),
+                storageArea: localStorage,
+            }),
+        );
+
+        // The error should be caught and the syncing flag should be reset via finally
+        // Verify that normal writes still persist after the error
+        writeArtifact(ref, 'after-error');
+        expect(localStorage.getItem(key)).toBe(JSON.stringify('after-error'));
+        expect(readArtifact(ref)).toBe('after-error');
+    });
 });

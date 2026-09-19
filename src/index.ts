@@ -598,11 +598,11 @@ export function artifactWithStorage<T = undefined>(
 
             try {
                 const next = event.newValue !== null ? deserialize(event.newValue) : fallback;
-
                 syncing = true;
                 writeState(state, next);
-                syncing = false;
             } catch {
+                // Ignore deserialization or write errors
+            } finally {
                 syncing = false;
             }
         });
