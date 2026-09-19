@@ -327,11 +327,11 @@ During SSR, React calls `getServerSnapshot` to determine what value to render on
 
 Artifacts store their state in a **module-level mutable store** (`Map` inside each artifact family). This has important SSR implications:
 
-- **On the server:** Module state may persist between requests depending on your framework. Some frameworks aim to provide per-request module isolation (e.g., Next.js App Router), though the exact behavior can vary; other frameworks may require manual cleanup between requests
+- **On the server:** Module state may persist between requests depending on your framework. **Verify that your runtime isolates or clears module state between requests; do not assume the shared store is request-safe without confirming your framework's behavior.** Some frameworks (e.g., Next.js App Router) aim to provide per-request module isolation, but exact behavior can vary.
 - **On the client:** The module is loaded once per page, and artifact state persists for the lifetime of the page (until reload or navigation)
 - **Hydration:** The client starts with its own fresh module state. Server-rendered values are not automatically transferred to the client — the client re-initializes each artifact from scratch on mount
 
-**Note:** ArtifactJS does not currently have comprehensive SSR tests. If you encounter issues with your SSR framework, please report them on GitHub.
+**Note:** ArtifactJS does not currently have SSR-specific tests. The library relies on React's `useSyncExternalStore` for SSR compatibility. If you encounter issues with your SSR framework, please report them on GitHub.
 
 ### Storage artifacts and SSR
 
