@@ -477,6 +477,116 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 </ErrorBoundary>
 ```
 
+### Error recovery and status inspection
+
+For more control over loading states and error handling, Artifact provides status inspection APIs that let you handle errors inline without Error Boundaries:
+
+#### `getArtifactStatus(ref)` — check status outside React
+
+Returns `'pending'`, `'resolved'`, or `'rejected'`:
+
+```jsx
+import { getArtifactStatus, readArtifact, resetArtifact } from '@urlund/artifactjs';
+
+const status = getArtifactStatus(usersArtifact);
+
+if (status === 'pending') {
+    console.log('Still loading...');
+} else if (status === 'rejected') {
+    console.log('Failed, retrying...');
+    resetArtifact(usersArtifact);
+} else {
+    const users = readArtifact(usersArtifact);
+    console.log('Users:', users);
+}
+```
+
+**Important notes:**
+- **Side effect:** Calling `getArtifactStatus()` triggers hydration (runs the initializer) if the artifact hasn't been accessed yet.
+- **Revalidation:** When an artifact with `maxAge` expires and revalidates, this returns `'pending'` (not `'resolved'` with a stale value). The status transitions from `'resolved'` → `'pending'` → `'resolved'` during refresh. Use `readArtifact()` if you need to read the stale value while revalidation is in progress.
+
+#### `useArtifactLoadable(ref)` — status-aware hook
+
+Returns `{ status, value, error }` without suspending or throwing. Use this to build custom loading states, inline error messages, or retry UIs:
+
+```jsx
+import { useArtifactLoadable, useResetArtifact } from '@urlund/artifactjs';
+
+function UserProfile({ userId }) {
+    const loadable = useArtifactLoadable(userArtifact({ id: userId }));
+    const reset = useResetArtifact(userArtifact({ id: userId }));
+
+    if (loadable.status === 'pending') {
+        return <Spinner />;
+    }
+
+    if (loadable.status === 'rejected') {
+        const errorMessage = loadable.error instanceof Error 
+            ? loadable.error.message 
+            : String(loadable.error);
+        return (
+            <div>
+                <p>Error: {errorMessage}</p>
+                <button onClick={reset}>Retry</button>
+            </div>
+        );
+    }
+
+    return <div>Hello, {loadable.value.name}!</div>;
+}
+```
+
+Unlike `useArtifactValue` (which suspends during loading and throws on error), `useArtifactLoadable` lets you handle all states explicitly in your component. This is useful when you want inline error messages or custom loading indicators without needing `<Suspense>` or `<ErrorBoundary>`.
+
+**Loadable object:**
+
+- `{ status: 'pending', value: undefined, error: undefined }` — initializer is running or revalidating
+- `{ status: 'resolved', value: T, error: undefined }` — value is available and fresh
+- `{ status: 'rejected', value: undefined, error: unknown }` — initializer threw an error
+
+**Revalidation behavior:** When an artifact with `maxAge` expires and revalidates:
+- The loadable status becomes `'pending'` with `value: undefined`
+- There is **no stale-while-revalidate** behavior — the previous value is discarded
+- This matches React Suspense semantics: the component shows `'pending'` state during refresh
+- If you need to keep displaying the stale value during revalidation, use `readArtifact()` in your pending state (it returns the stale value during revalidation)
+
+#### Retry recipe with `useResetArtifact` + Error Boundary
+
+You can also combine `useResetArtifact` with an Error Boundary for a declarative retry pattern:
+
+```jsx
+import { ErrorBoundary } from 'react-error-boundary';
+import { useResetArtifact } from '@urlund/artifactjs';
+
+function ErrorFallback({ error, resetErrorBoundary }) {
+    const resetUsers = useResetArtifact(usersArtifact);
+
+    const handleRetry = () => {
+        resetUsers();
+        resetErrorBoundary();
+    };
+
+    return (
+        <div>
+            <p>Error: {error.message}</p>
+            <button onClick={handleRetry}>Retry</button>
+        </div>
+    );
+}
+
+function App() {
+    return (
+        <ErrorBoundary FallbackComponent={ErrorFallback}>
+            <Suspense fallback={<div>Loading...</div>}>
+                <UserList />
+            </Suspense>
+        </ErrorBoundary>
+    );
+}
+```
+
+When the user clicks "Retry", `resetUsers()` re-fetches the data and `resetErrorBoundary()` clears the error state, allowing the component to re-render.
+
 ## Benchmarks
 
 Compare Artifact against Jotai locally. The scenarios match the in-app benchmark (micro: vanilla store ops; React: hook updates with `requestAnimationFrame` timing, `memo` subscribers):
@@ -507,8 +617,10 @@ Results print to the console. Absolute milliseconds vary by machine; React numbe
 | `useArtifactValue(ref)` | hook | Returns the current value — subscribes in this component, re-renders on change. Suspends during revalidation |
 | `useSetArtifact(ref)` | hook | Returns a setter without subscribing in this component — subscribed components still re-render |
 | `useResetArtifact(ref)` | hook | Returns a reset function -- restores initial value or re-fetches |
+| `useArtifactLoadable(ref)` | hook | Returns `{ status, value, error }` without suspending or throwing — for custom loading/error UIs |
 | `readArtifact(ref)` | function | Read the current value outside React (sync peek). Returns stale value during revalidation |
 | `resolveArtifact(ref)` | function | Wait until resolved outside React; waits for fresh value during revalidation. Rejects on artifact error |
 | `resetArtifact(ref)` | function | Reset to initial value outside React |
 | `writeArtifact(ref, value)` | function | Write a value outside React |
 | `subscribeArtifact(ref, fn)` | function | Subscribe to changes outside React, returns unsubscribe |
+| `getArtifactStatus(ref)` | function | Get current status outside React: `'pending'`, `'resolved'`, or `'rejected'` |

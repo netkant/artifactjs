@@ -70,11 +70,12 @@ type ArtifactState = {
     error: unknown;
     promise: Promise<unknown> | undefined;
     dependencies: Set<ArtifactState> | null;
-    depCleanups: Array<() => void> | null;
+    depCleanups: Array<(() => void)> | null;
     updatedAt: number;
     revalidateTimer: ReturnType<typeof setTimeout> | undefined;
     initScratch: InitScratch | null;
     generation: number;
+    cachedLoadable: unknown | undefined;
 };
 
 function createFamily(initializer: unknown, options: ArtifactOptions = {}): ArtifactFamily {
@@ -329,6 +330,7 @@ function getOrCreateState(artifactRef: Artifact): ArtifactState {
         revalidateTimer: undefined,
         initScratch: null,
         generation: 0,
+        cachedLoadable: undefined,
     };
 
     artifactRef.family.instances.set(artifactRef.key, state);
@@ -400,6 +402,8 @@ function recomputeDerivedState(state: ArtifactState, artifactRef: Artifact): voi
         state.status = 'rejected';
         state.error = error;
         state.promise = undefined;
+        // Build new loadable for rejected state
+        state.cachedLoadable = { status: 'rejected', value: undefined, error };
         if (depsChanged) {
             wireDepSubscriptions(state, artifactRef, depStates);
         }
@@ -516,6 +520,8 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
         state.status = 'pending';
         state.error = undefined;
         state.generation++;
+        // Build new loadable for pending state
+        state.cachedLoadable = { status: 'pending', value: undefined, error: undefined };
         const expectedGeneration = state.generation;
         state.promise = Promise.all(pendingDeps).then(
             () => {
@@ -539,6 +545,8 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
                 state.status = 'rejected';
                 state.error = error;
                 state.promise = undefined;
+                // Build new loadable for rejected state
+                state.cachedLoadable = { status: 'rejected', value: undefined, error };
                 notify(state);
                 throw error;
             },
@@ -553,6 +561,8 @@ function hydrateStateFromInitializer(state: ArtifactState, artifactRef: Artifact
         state.status = 'rejected';
         state.error = error;
         state.promise = undefined;
+        // Build new loadable for rejected state
+        state.cachedLoadable = { status: 'rejected', value: undefined, error };
         wireDepSubscriptions(state, artifactRef, depStates);
         return;
     }
@@ -567,6 +577,8 @@ function markResolved(state: ArtifactState, value: unknown): void {
     state.error = undefined;
     state.promise = undefined;
     state.updatedAt = Date.now();
+    // Build new loadable for resolved state
+    state.cachedLoadable = { status: 'resolved', value, error: undefined };
     scheduleRevalidate(state);
 }
 
@@ -577,6 +589,8 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
         state.status = 'pending';
         state.error = undefined;
         state.generation++;
+        // Build new loadable for pending state
+        state.cachedLoadable = { status: 'pending', value: undefined, error: undefined };
         const expectedGeneration = state.generation;
         state.promise = Promise.resolve(nextValue).then(
             (resolvedValue) => {
@@ -601,6 +615,8 @@ function applyValue(state: ArtifactState, nextValue: unknown): boolean {
                 state.status = 'rejected';
                 state.error = error;
                 state.promise = undefined;
+                // Build new loadable for rejected state
+                state.cachedLoadable = { status: 'rejected', value: undefined, error };
                 notify(state);
                 throw error;
             },
@@ -958,4 +974,114 @@ export function subscribeArtifact<T>(candidate: Artifact<T>, listener: Listener)
     const artifactRef = ensureArtifactRef(candidate);
     const state = getOrCreateState(artifactRef);
     return subscribe(state, listener);
+}
+
+/**
+ * Get the current status of an artifact.
+ * 
+ * Returns:
+ * - `'pending'` — initializer is running or revalidating, value not available
+ * - `'resolved'` — value is available and fresh
+ * - `'rejected'` — initializer threw an error
+ * 
+ * **Side effect:** Calling this function triggers hydration (runs the initializer)
+ * if the artifact hasn't been accessed yet.
+ * 
+ * **Revalidation behavior:** During revalidation (when an expired artifact is refreshing),
+ * this returns `'pending'` (not `'resolved'` with a stale value). Use `readArtifact()`
+ * if you need the stale value during revalidation.
+ * 
+ * Use this to implement custom loading states, retry logic, or status-aware UIs.
+ * 
+ * @example
+ * ```ts
+ * const status = getArtifactStatus(usersArtifact);
+ * if (status === 'pending') {
+ *   return <Spinner />;
+ * }
+ * if (status === 'rejected') {
+ *   return <ErrorRetry onRetry={() => resetArtifact(usersArtifact)} />;
+ * }
+ * return <UserList users={readArtifact(usersArtifact)} />;
+ * ```
+ */
+export function getArtifactStatus<T>(candidate: Artifact<T>): 'pending' | 'resolved' | 'rejected' {
+    const artifactRef = ensureArtifactRef(candidate);
+    const state = getOrCreateState(artifactRef);
+    return state.status;
+}
+
+/** Loadable state returned by `useArtifactLoadable`. */
+export type ArtifactLoadable<T> =
+    | { status: 'pending'; value: undefined; error: undefined }
+    | { status: 'resolved'; value: T; error: undefined }
+    | { status: 'rejected'; value: undefined; error: unknown };
+
+/**
+ * Read an artifact's status, value, and error without suspending or throwing.
+ * 
+ * Unlike `useArtifactValue` (which suspends on pending and throws on error),
+ * this hook returns a loadable object that lets you handle all states explicitly
+ * in your component.
+ * 
+ * **Revalidation behavior:** During revalidation (when an expired artifact is refreshing),
+ * the loadable status becomes `'pending'` with `value: undefined`. There is no
+ * stale-while-revalidate behavior — the previous value is not preserved. If you need
+ * the stale value during revalidation, use `readArtifact()` instead.
+ * 
+ * Use this for custom loading states, inline error messages, or retry UIs without
+ * needing Suspense or Error Boundaries.
+ * 
+ * @example
+ * ```tsx
+ * function UserProfile({ userId }) {
+ *   const loadable = useArtifactLoadable(userArtifact({ id: userId }));
+ *   const reset = useResetArtifact(userArtifact({ id: userId }));
+ * 
+ *   if (loadable.status === 'pending') {
+ *     return <Spinner />;
+ *   }
+ * 
+ *   if (loadable.status === 'rejected') {
+ *     const errorMessage = loadable.error instanceof Error
+ *       ? loadable.error.message
+ *       : String(loadable.error);
+ *     return (
+ *       <div>
+ *         <p>Error: {errorMessage}</p>
+ *         <button onClick={reset}>Retry</button>
+ *       </div>
+ *     );
+ *   }
+ * 
+ *   return <div>Hello, {loadable.value.name}!</div>;
+ * }
+ * ```
+ */
+export function useArtifactLoadable<T>(candidate: Artifact<T>): ArtifactLoadable<T> {
+    const artifactRef = ensureArtifactRef(candidate);
+    const state = getOrCreateState(artifactRef);
+
+    const subscribeToStore = useCallback((onStoreChange: () => void) => subscribe(state, onStoreChange), [state]);
+    
+    // getSnapshot is read-only - loadable is built at mutation sites
+    const getSnapshot = useCallback((): ArtifactLoadable<T> => {
+        // Return cached loadable built at mutation site, or build one if missing (e.g., initial state)
+        const cached = state.cachedLoadable as ArtifactLoadable<T> | undefined;
+        if (cached) {
+            return cached;
+        }
+        
+        // Fallback: build loadable for initial state (before any mutations)
+        // This should only happen on first read of a static artifact
+        if (state.status === 'pending') {
+            return { status: 'pending', value: undefined, error: undefined };
+        }
+        if (state.status === 'rejected') {
+            return { status: 'rejected', value: undefined, error: state.error };
+        }
+        return { status: 'resolved', value: state.value as T, error: undefined };
+    }, [state]);
+
+    return useSyncExternalStore(subscribeToStore, getSnapshot, getSnapshot);
 }
