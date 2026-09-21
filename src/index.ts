@@ -331,6 +331,12 @@ function createCircularDependencyError(state: ArtifactState): CircularDependency
 }
 
 function updateLRU(family: ArtifactFamily, key: string): void {
+    // Skip LRU tracking when maxEntries is Infinity (default)
+    // Avoids O(n²) cost on cold creation for unlimited caches
+    if (!Number.isFinite(family.options.maxEntries)) {
+        return;
+    }
+    
     const { lruOrder } = family;
     const index = lruOrder.indexOf(key);
     

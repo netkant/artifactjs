@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Nested/exotic types (Date/Map/Set/array/nested objects): unchanged fallback to `stableStringify`
   - Overall speedup: ~19% for realistic mixed params
   - Cache key format intentionally changed (session-only; no persistence implications)
+- **Performance**: Fixed O(n²) LRU tracking overhead on cold parameterized family creation
+  - LRU tracking now skipped when `maxEntries` is `Infinity` (the default)
+  - Cold path (100k unique instances): **258x faster** (41s → 158ms)
+  - Families with default unlimited cache now create instances at O(n) instead of O(n²)
+  - Finite `maxEntries` LRU tracking unaffected and works as before
   
 ### Fixed
 
