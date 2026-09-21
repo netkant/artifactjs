@@ -110,6 +110,13 @@ Each unique set of parameters gets its own cached value -- `userArtifact({ id: 1
 
 By default, parameterized instances are cached by a stable JSON representation with sorted object keys -- `{ b: 2, a: 1 }` and `{ a: 1, b: 2 }` share the same instance. **By default, there is no limit** on the number of cached instances. You can opt-in to automatic memory management with the `key` and `maxEntries` options:
 
+**Cache key performance:** The default key generation uses structural equality and is optimized with tiered fast paths:
+- Single primitives (e.g., `42`, `"hello"`, `true`): Very fast tagged keys
+- Flat objects with primitives only (e.g., `{ id: 1, name: "test" }`): Fast sorted keys
+- Nested objects, arrays, Date, Map, Set, etc.: Full structural comparison (slower but correct)
+
+For performance-critical hot paths, consider providing a custom `key` function that extracts only the essential distinguishing fields.
+
 ```jsx
 const userArtifact = artifact(
     ({ id }) => fetch(`/api/users/${id}`).then((res) => res.json()),

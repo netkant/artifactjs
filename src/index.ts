@@ -163,6 +163,98 @@ function createArtifactRef(family: ArtifactFamily, args: unknown[] = []): Artifa
     };
 }
 
+function isPrimitive(value: unknown): value is string | number | boolean | null | undefined | bigint {
+    const t = typeof value;
+    return (
+        value === null ||
+        value === undefined ||
+        t === 'string' ||
+        t === 'number' ||
+        t === 'boolean' ||
+        t === 'bigint'
+    );
+}
+
+function isFlatObject(value: unknown): value is Record<string, string | number | boolean | null | undefined | bigint> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    
+    // Check for exotic types
+    if (
+        value instanceof Date ||
+        value instanceof RegExp ||
+        value instanceof Map ||
+        value instanceof Set ||
+        isThenable(value)
+    ) {
+        return false;
+    }
+    
+    // Check all values are primitives
+    for (const key in value) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) {
+            continue;
+        }
+        const val = (value as Record<string, unknown>)[key];
+        if (!isPrimitive(val)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+function fastPrimitiveKey(value: unknown): string {
+    if (value === null) return 'p:n:null';
+    if (value === undefined) return 'p:u:undefined';
+    
+    const t = typeof value;
+    if (t === 'string') return `p:s:${value}`;
+    if (t === 'number') return `p:n:${value}`;
+    if (t === 'boolean') return `p:b:${value}`;
+    if (t === 'bigint') return `p:i:${value}`;
+    
+    // Fallback (should not reach here if isPrimitive is correct)
+    return `p:?:${String(value)}`;
+}
+
+function fastFlatObjectKey(obj: Record<string, string | number | boolean | null | undefined | bigint>): string {
+    const keys = Object.keys(obj).sort();
+    const pairs: string[] = [];
+    
+    for (const key of keys) {
+        const val = obj[key];
+        let taggedVal: string;
+        
+        // Use same primitive tagging as fastPrimitiveKey for type safety
+        if (val === null) {
+            taggedVal = 'n:null';
+        } else if (val === undefined) {
+            taggedVal = 'u:undefined';
+        } else {
+            const t = typeof val;
+            if (t === 'string') {
+                // JSON.stringify string values to escape delimiters
+                taggedVal = `s:${JSON.stringify(val)}`;
+            } else if (t === 'number') {
+                taggedVal = `n:${val}`;
+            } else if (t === 'boolean') {
+                taggedVal = `b:${val}`;
+            } else if (t === 'bigint') {
+                taggedVal = `i:${val}`;
+            } else {
+                taggedVal = `?:${String(val)}`;
+            }
+        }
+        
+        // JSON.stringify key to escape : and , delimiters
+        pairs.push(`${JSON.stringify(key)}:${taggedVal}`);
+    }
+    
+    return `f:${pairs.join(',')}`;
+}
+
 function createCacheKey(family: ArtifactFamily, args: unknown[]): string {
     if (args.length === 0) {
         return DEFAULT_KEY;
@@ -178,6 +270,20 @@ function createCacheKey(family: ArtifactFamily, args: unknown[]): string {
         return customKey(params as object);
     }
 
+    // Tiered fast paths for default key generation
+    const firstArg = args[0];
+    
+    // Fast path: single primitive
+    if (args.length === 1 && isPrimitive(firstArg)) {
+        return fastPrimitiveKey(firstArg);
+    }
+    
+    // Fast path: single flat object (one level, primitives only)
+    if (args.length === 1 && isFlatObject(firstArg)) {
+        return fastFlatObjectKey(firstArg as Record<string, string | number | boolean | null | undefined | bigint>);
+    }
+    
+    // Slow path: full stableStringify for nested/exotic types
     try {
         return stableStringify(args);
     } catch {
@@ -225,6 +331,12 @@ function createCircularDependencyError(state: ArtifactState): CircularDependency
 }
 
 function updateLRU(family: ArtifactFamily, key: string): void {
+    // Skip LRU tracking when maxEntries is Infinity (default)
+    // Avoids O(n²) cost on cold creation for unlimited caches
+    if (!Number.isFinite(family.options.maxEntries)) {
+        return;
+    }
+    
     const { lruOrder } = family;
     const index = lruOrder.indexOf(key);
     
